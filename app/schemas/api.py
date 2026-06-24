@@ -16,6 +16,7 @@ class StudentUpdate(BaseModel):
 
 
 class HonorCreate(BaseModel):
+    honor_number: str | None = None
     honor_time: date | None = None
     honor_level: str | None = None
     honor_description: str = Field(min_length=1)
