@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class StudentUpdate(BaseModel):
+    birth_date: date | None = None
     phone: str | None = None
     political_status: str | None = None
     professional_title: str | None = None
@@ -12,11 +13,9 @@ class StudentUpdate(BaseModel):
     talent_category: str | None = None
     administrative_position: str | None = None
     social_part_time_positions: str | None = None
-    status: str | None = None
 
 
 class HonorCreate(BaseModel):
-    honor_number: str | None = None
     honor_time: date | None = None
     honor_level: str | None = None
     honor_description: str = Field(min_length=1)
@@ -27,7 +26,6 @@ class EntityUpdate(BaseModel):
     entity_intro: str | None = None
     entity_type: str | None = None
     entity_subtype: str | None = None
-    entity_industry_type: str | None = None
     established_date: date | None = None
     registered_address: str | None = None
     unified_social_credit_code: str | None = None

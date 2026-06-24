@@ -30,6 +30,70 @@ def student_query(name: str | None, id_card: str | None, district: str | None, e
     return stmt
 
 
+def archive_data(student: Student) -> dict:
+    """返回七个需求模块的完整学员档案。"""
+    entities = [entity for entity in student.entities if entity.deleted_at is None]
+    return {
+        "basic_info": {
+            "id": student.id, "id_card_number": student.id_card_number, "name": student.name,
+            "gender": student.gender, "birth_date": student.birth_date, "age": student.age,
+            "ethnicity": student.ethnicity, "native_place": student.native_place,
+            "district_county": student.district_county, "political_status": student.political_status,
+            "phone": student.phone, "health_status": student.health_status,
+            "professional_title": student.professional_title, "wechat": student.wechat,
+            "email": student.email, "household_type": student.household_type,
+            "postal_code": student.postal_code, "home_address": student.home_address,
+            "talent_category": student.talent_category, "status": student.status,
+            "administrative_position": student.administrative_position,
+            "social_part_time_positions": student.social_part_time_positions,
+        },
+        "education": None if student.education is None else {
+            "education_level": student.education.education_level,
+            "graduate_school": student.education.graduate_school, "major": student.education.major,
+            "certificate_number": student.education.certificate_number,
+            "learning_experience": student.education.learning_experience,
+            "work_experience": student.education.work_experience,
+            "training_experience": student.education.training_experience,
+        },
+        "honors": [
+            {"id": honor.id, "honor_time": honor.honor_time, "honor_level": honor.honor_level,
+             "honor_description": honor.honor_description}
+            for honor in student.honors if honor.deleted_at is None
+        ],
+        "business_entities": [
+            {"id": entity.id, "entity_name": entity.entity_name, "entity_intro": entity.entity_intro,
+             "entity_type": entity.entity_type, "entity_subtype": entity.entity_subtype,
+             "established_date": entity.established_date, "registered_address": entity.registered_address,
+             "unified_social_credit_code": entity.unified_social_credit_code,
+             "student_position_in_entity": entity.student_position_in_entity}
+            for entity in entities
+        ],
+        "annual_revenues": [
+            {"id": revenue.id, "business_entity_id": entity.id, "entity_name": entity.entity_name,
+             "year": revenue.year, "operating_revenue": revenue.operating_revenue,
+             "net_profit": revenue.net_profit, "fixed_asset_net_value": revenue.fixed_asset_net_value,
+             "total_assets": revenue.total_assets, "total_liabilities": revenue.total_liabilities,
+             "employee_count": revenue.employee_count, "current_assets": revenue.current_assets,
+             "management_expense": revenue.management_expense,
+             "government_subsidy_amount": revenue.government_subsidy_amount}
+            for entity in entities for revenue in entity.revenues
+        ],
+        "main_industries": [
+            {"id": industry.id, "business_entity_id": entity.id, "entity_name": entity.entity_name,
+             "industry_name": industry.industry_name,
+             "three_year_total_income": industry.three_year_total_income,
+             "operation_years": industry.operation_years}
+            for entity in entities for industry in entity.industries
+        ],
+        "cultivations": [
+            {"id": cultivation.id, "cultivation_year": cultivation.cultivation_year,
+             "cultivation_needs": cultivation.cultivation_needs,
+             "training_experience": cultivation.training_experience}
+            for cultivation in student.cultivations
+        ],
+    }
+
+
 @router.get("/auth/me")
 def me(user: User = Depends(current_user)) -> ApiResponse:
     return ApiResponse(data={"id": user.id, "username": user.username})
@@ -59,12 +123,12 @@ def students(name: str | None = None, id_card: str | None = None, district: str 
 def student_detail(student_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id))
     if not student: raise HTTPException(404, "学员不存在")
-    return ApiResponse(data={"id": student.id, "name": student.name, "id_card_number": student.id_card_number, "age": student.age, "phone": student.phone, "district_county": student.district_county, "political_status": student.political_status, "professional_title": student.professional_title, "status": student.status, "honors": [{"id": h.id, "honor_time": h.honor_time, "honor_level": h.honor_level, "honor_description": h.honor_description} for h in student.honors if not h.deleted_at], "entities": [{"id": e.id, "entity_name": e.entity_name, "entity_type": e.entity_type, "registered_address": e.registered_address, "revenues": [{"id": r.id, "year": r.year, "operating_revenue": r.operating_revenue} for r in e.revenues], "industries": [{"id": i.id, "industry_name": i.industry_name} for i in e.industries]} for e in student.entities if not e.deleted_at]})
+    return ApiResponse(data=archive_data(student))
 
 
 @router.get("/students/by-id-card/{id_card_number}")
 def by_id_card(id_card_number: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
-    student = db.scalar(select(Student).where(Student.id_card_number == id_card_number.upper()))
+    student = db.scalar(select(Student).where(Student.id_card_number == id_card_number.replace(" ", "").upper()))
     if not student: raise HTTPException(404, "学员不存在")
     return student_detail(student.id, db, user)
 
@@ -121,7 +185,7 @@ def entity_list(entity_name: str | None = None, student_name: str | None = None,
 def entity_detail(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     entity = db.scalar(select(BusinessEntity).options(selectinload(BusinessEntity.revenues), selectinload(BusinessEntity.industries)).where(BusinessEntity.id == entity_id))
     if not entity: raise HTTPException(404, "经营主体不存在")
-    return ApiResponse(data={"id": entity.id, "student_id": entity.student_id, "entity_name": entity.entity_name, "entity_intro": entity.entity_intro, "entity_type": entity.entity_type, "entity_subtype": entity.entity_subtype, "entity_industry_type": entity.entity_industry_type, "registered_address": entity.registered_address, "unified_social_credit_code": entity.unified_social_credit_code})
+    return ApiResponse(data={"id": entity.id, "student_id": entity.student_id, "entity_name": entity.entity_name, "entity_intro": entity.entity_intro, "entity_type": entity.entity_type, "entity_subtype": entity.entity_subtype, "established_date": entity.established_date, "registered_address": entity.registered_address, "unified_social_credit_code": entity.unified_social_credit_code, "student_position_in_entity": entity.student_position_in_entity})
 
 
 @router.post("/business-entities/{entity_id}/revenue")
