@@ -36,3 +36,20 @@ def test_change_password(authenticated_client):
     assert result.status_code == 200
     authenticated_client.post("/logout")
     assert authenticated_client.post("/login", data={"username": "admin", "password": "NewTestPass456!"}).status_code == 200
+
+
+def test_id_card_page_search_and_category_tables(authenticated_client):
+    with SessionLocal() as db:
+        student = Student(name="分类测试", id_card_number="11010519491231002X")
+        db.add(student); db.commit(); student_id = student.id
+    result = authenticated_client.get("/students", params={"id_card": "11010519491231002x"})
+    assert result.status_code == 200 and "分类测试" in result.text and "身份证号（精准查询）" in result.text
+    detail = authenticated_client.get(f"/students/{student_id}")
+    for title in ("基本信息表", "受教育情况表", "荣誉情况表", "新型经营主体情况表", "近三年营收情况表", "主营产业情况表", "个人培育信息表"):
+        assert title in detail.text
+
+
+def test_import_template_download(authenticated_client):
+    result = authenticated_client.get("/api/v1/import/template.xlsx")
+    assert result.status_code == 200
+    assert result.headers["content-type"].startswith("application/vnd.openxmlformats")

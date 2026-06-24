@@ -53,16 +53,17 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/students", response_class=HTMLResponse)
-def student_list(request: Request, name: str = "", district: str = "", entity_name: str = "", page: int = 1, db: Session = Depends(get_db)):
+def student_list(request: Request, name: str = "", id_card: str = "", district: str = "", entity_name: str = "", page: int = 1, db: Session = Depends(get_db)):
     user = _user(request, db)
     if not user: return RedirectResponse("/login")
     stmt = select(Student).where(Student.deleted_at.is_(None))
     if name: stmt = stmt.where(Student.name.contains(name))
+    if id_card: stmt = stmt.where(Student.id_card_number == id_card.replace(" ", "").upper())
     if district: stmt = stmt.where(Student.district_county.contains(district))
     if entity_name: stmt = stmt.join(Student.entities).where(BusinessEntity.entity_name.contains(entity_name))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(stmt.order_by(Student.id.desc()).offset((max(page, 1)-1)*20).limit(20)).all()
-    return templates.TemplateResponse(request, "students.html", {"user": user, "students": rows, "total": total, "page": page, "name": name, "district": district, "entity_name": entity_name})
+    return templates.TemplateResponse(request, "students.html", {"user": user, "students": rows, "total": total, "page": page, "name": name, "id_card": id_card, "district": district, "entity_name": entity_name})
 
 
 @router.get("/students/{student_id}", response_class=HTMLResponse)

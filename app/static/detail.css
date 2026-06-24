@@ -1,0 +1,15 @@
+.category-index{display:flex;gap:8px;overflow-x:auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;margin:0 0 20px;position:sticky;top:10px;z-index:5}
+.category-index a{white-space:nowrap;color:var(--pine);background:#edf3ef;padding:8px 12px;border-radius:8px;font-weight:700;text-decoration:none}
+.category-panel{scroll-margin-top:85px}
+.category-title{display:flex;align-items:center;gap:12px}
+.category-title span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--grain);color:var(--ink);font:bold 13px Consolas,monospace}
+.category-title h2{margin:0}
+.field-grid{display:grid;grid-template-columns:150px minmax(160px,1fr) 150px minmax(160px,1fr);margin-top:18px}
+.field-grid dt{background:#f1f4f0;font-weight:700}
+.field-grid dd{min-width:0}
+.entity-record{border-top:1px solid var(--line);margin-top:18px;padding-top:18px}
+.entity-record h3{font:700 22px STKaiti,KaiTi,serif}
+.records-table{overflow-x:auto}
+.records-table table{min-width:980px}
+.hint{color:var(--muted);font-size:13px}
+@media(max-width:900px){.field-grid{grid-template-columns:125px 1fr}.category-index{top:0}}

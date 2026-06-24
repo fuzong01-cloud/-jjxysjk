@@ -76,6 +76,7 @@ class HonorRecord(Base, TimestampMixin):
     __tablename__ = "honor_records"
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id", ondelete="CASCADE"), index=True)
+    honor_number: Mapped[str | None] = mapped_column(String(100))
     honor_time: Mapped[date | None] = mapped_column(Date)
     honor_level: Mapped[str | None] = mapped_column(String(100))
     honor_description: Mapped[str] = mapped_column(Text)
