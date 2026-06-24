@@ -78,7 +78,7 @@ def parse_workbook(path: Path) -> tuple[str, list[ParsedRow], list[str]]:
         item.basic = {field: raw.get(header) for header, field in BASIC_FIELDS.items() if header in raw}
         item.education = {field: raw.get(header) for header, field in EDUCATION_FIELDS.items() if header in raw}
         item.entity = {field: raw.get(header) for header, field in ENTITY_FIELDS.items() if header in raw}
-        item.honors = _grouped(raw, {"个人获得荣誉时间": "honor_time", "个人获得荣誉级别": "honor_level", "个人获得荣誉情况": "honor_description"})
+        item.honors = _grouped(raw, {"荣誉编号": "honor_number", "个人获得荣誉时间": "honor_time", "个人获得荣誉级别": "honor_level", "个人获得荣誉情况": "honor_description"})
         item.revenues = _grouped(raw, {"营收年份": "year", "营业收入（万元）": "operating_revenue", "净利润（万元）": "net_profit", "固定资产净值（万元）": "fixed_asset_net_value", "总资产（万元）": "total_assets", "负债总额（万元）": "total_liabilities", "从业人数（人）": "employee_count", "流动资产（万元）": "current_assets", "管理费用（万元）": "management_expense", "政府补贴金额（万元）": "government_subsidy_amount"})
         item.industries = _grouped(raw, {"主营产业": "industry_name", "近三年经营总收入（万元）": "three_year_total_income", "经营年限": "operation_years"})
         item.cultivation = {"cultivation_year": raw.get("培育年份"), "cultivation_needs": raw.get("培育诉求"), "training_experience": raw.get("培训经历")}

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/v1")
 def student_query(name: str | None, id_card: str | None, district: str | None, entity_name: str | None):
     stmt = select(Student).where(Student.deleted_at.is_(None))
     if name: stmt = stmt.where(Student.name.contains(name))
-    if id_card: stmt = stmt.where(Student.id_card_number.contains(id_card))
+    if id_card: stmt = stmt.where(Student.id_card_number == id_card.replace(" ", "").upper())
     if district: stmt = stmt.where(Student.district_county.contains(district))
     if entity_name: stmt = stmt.join(Student.entities).where(BusinessEntity.entity_name.contains(entity_name))
     return stmt
@@ -178,6 +178,30 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
     try: batch = create_preview(db, path, file.filename, user.id, get_settings().upload_dir)
     finally: path.unlink(missing_ok=True)
     return ApiResponse(data={"batch_id": batch.id, "total_rows": batch.total_rows, "new_rows": batch.new_rows, "updated_rows": batch.updated_rows, "failed_rows": batch.failed_rows, "warning_count": batch.warning_count}, message="预览完成")
+
+
+@router.get("/import/template.xlsx")
+def import_template(_user: User = Depends(current_user)):
+    headers = [
+        "学员姓名", "身份证号", "状态", "培育年份", "所在区县", "手机号", "性别", "出生年月日", "民族", "籍贯", "年龄",
+        "政治面貌", "人才类别", "健康状况", "职称", "微信号", "邮箱", "户口性质", "邮编", "家庭住址", "行政职务", "社会兼职",
+        "文化程度", "毕业院校", "所学专业", "证书编号", "学习经历", "工作经历", "培训经历",
+        "荣誉编号1", "个人获得荣誉时间1", "个人获得荣誉级别1", "个人获得荣誉情况1",
+        "荣誉编号2", "个人获得荣誉时间2", "个人获得荣誉级别2", "个人获得荣誉情况2",
+        "新型经营主体名称", "新型经营主体简介", "新型经营主体类型", "新型经营主体细分类型", "主体产业类型", "成立日期", "登记住址",
+        "统一社会信用代码", "从事相关产业年限", "在新型主体中职务", "近三年专利申请情况", "近三年带动农民（户）数量",
+        "相关技术合作单位（家）", "合作单位分别为", "是否建有专门质检机构", "是否通过ISO9000、HACCP、GAP、GMP等质量体系认证",
+        "是否获得“绿色食品、有机农产品和农产品地理标志”认证", "新型经营主体获得重要奖励及荣誉情况", "新型经营主体已获得发展配套支持",
+    ]
+    for index in range(1, 4):
+        headers.extend([f"营收年份{index}", f"营业收入（万元）{index}", f"净利润（万元）{index}", f"固定资产净值（万元）{index}", f"总资产（万元）{index}", f"负债总额（万元）{index}", f"从业人数（人）{index}", f"流动资产（万元）{index}", f"管理费用（万元）{index}", f"政府补贴金额（万元）{index}"])
+    for index in range(1, 4):
+        headers.extend([f"主营产业{index}", f"近三年经营总收入（万元）{index}", f"经营年限{index}"])
+    headers.append("培育诉求")
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"; sheet.append(headers); sheet.freeze_panes = "A2"; sheet.auto_filter.ref = f"A1:{sheet.cell(1, len(headers)).coordinate}"
+    note = book.create_sheet("填写说明"); note.append(["项目", "说明"]); note.append(["必填字段", "学员姓名、身份证号"]); note.append(["数据结构", "第一行为字段名；从第二行开始每行一位学员"]); note.append(["重复信息", "荣誉、年度营收、主营产业使用带序号的列组填写"]); note.append(["日期", "建议使用 YYYY-MM-DD"]); note.append(["金额", "填写数字，单位万元"])
+    stream = tempfile.SpooledTemporaryFile(); book.save(stream); stream.seek(0)
+    return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=touyan_import_template.xlsx"})
 
 
 @router.post("/import/batches/{batch_id}/commit")

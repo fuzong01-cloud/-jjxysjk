@@ -32,9 +32,14 @@ def create_preview(db: Session, source: Path, original_name: str, user_id: int |
     existing = set(db.scalars(select(Student.id_card_number)).all())
     for item in rows:
         try:
-            card = normalize_id_card(item.basic.get("id_card_number"))
+            card = normalize_id_card(item.basic.get("id_card_number"), validate_checksum=False)
             if not clean_text(item.basic.get("name")):
                 raise ValueError("学员姓名不能为空")
+            try:
+                normalize_id_card(card, validate_checksum=True)
+            except ValueError as exc:
+                batch.warning_count += 1
+                _error(batch, item.row_number, "id_card_number", card, str(exc), "warning")
             batch.updated_rows += card in existing
             batch.new_rows += card not in existing
         except ValueError as exc:
@@ -53,7 +58,7 @@ def _convert_row(item: ParsedRow) -> tuple[dict[str, Any], list[tuple[str, str]]
     data = {key: clean_text(value) for key, value in item.basic.items()}
     errors: list[tuple[str, str]] = []
     try:
-        data["id_card_number"] = normalize_id_card(data.get("id_card_number"))
+        data["id_card_number"] = normalize_id_card(data.get("id_card_number"), validate_checksum=False)
         data["birth_date"] = parse_date(data.get("birth_date")) or birth_date_from_id_card(data["id_card_number"])
         data["gender"] = data.get("gender") or gender_from_id_card(data["id_card_number"])
     except ValueError as exc:
@@ -100,7 +105,7 @@ def commit_batch(db: Session, batch: ImportBatch, user_id: int | None) -> Import
             if description:
                 try: honor_time = parse_date(honor.get("honor_time"))
                 except ValueError: honor_time = None
-                student.honors.append(HonorRecord(honor_time=honor_time, honor_level=clean_text(honor.get("honor_level")), honor_description=description, source_column_group=honor["source_column_group"]))
+                student.honors.append(HonorRecord(honor_number=clean_text(honor.get("honor_number")), honor_time=honor_time, honor_level=clean_text(honor.get("honor_level")), honor_description=description, source_column_group=honor["source_column_group"]))
         entity_data = {k: clean_text(v) for k, v in item.entity.items()}
         for key in ("established_date",):
             try: entity_data[key] = parse_date(entity_data.get(key))

@@ -22,3 +22,15 @@ def test_preview_and_commit(tmp_path: Path):
         assert student.name == "张三"
         assert len(student.honors) == 1
 
+
+def test_checksum_warning_does_not_drop_student(tmp_path: Path):
+    path = tmp_path / "checksum_warning.xlsx"
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"
+    sheet.append(["学员姓名", "身份证号"])
+    sheet.append(["梁晴", "110228197504130000"])
+    book.save(path)
+    with SessionLocal() as db:
+        batch = create_preview(db, path, path.name, None, get_settings().upload_dir)
+        assert batch.success_rows == 1 and batch.failed_rows == 0 and batch.warning_count == 1
+        commit_batch(db, batch, None)
+        assert db.query(Student).filter_by(name="梁晴").count() == 1
