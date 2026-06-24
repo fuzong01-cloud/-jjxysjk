@@ -1,0 +1,3 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{% block title %}头雁学员档案{% endblock %}</title><link rel="stylesheet" href="/static/app.css"></head>
+<body><div class="shell"><aside><a class="brand" href="/"><span>头雁</span><small>学员档案库</small></a><nav><a href="/">总览</a><a href="/students">学员档案</a><a href="/import">数据导入</a><a href="/audit">操作日志</a><a href="/backups">备份恢复</a><a href="/docs">API 文档</a></nav><form action="/logout" method="post"><button class="quiet">退出 {{ user.username if user else '' }}</button></form></aside><main>{% block content %}{% endblock %}</main></div><script src="/static/app.js"></script>{% block scripts %}{% endblock %}</body></html>
+

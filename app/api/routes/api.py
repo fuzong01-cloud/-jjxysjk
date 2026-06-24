@@ -1,0 +1,187 @@
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
+from openpyxl import Workbook
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.core.auth import current_user
+from app.core.config import get_settings
+from app.core.database import get_db
+from app.core.security import mask_id_card, mask_phone
+from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, BusinessEntity, HonorRecord, ImportBatch, ImportError, MainIndustry, Student, User
+from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, RevenueCreate, StudentUpdate
+from app.services.audit_service import add_audit
+from app.services.backup_service import create_backup, restore_database
+from app.services.import_service import commit_batch, create_preview
+
+
+router = APIRouter(prefix="/api/v1")
+
+
+def student_query(name: str | None, id_card: str | None, district: str | None, entity_name: str | None):
+    stmt = select(Student).where(Student.deleted_at.is_(None))
+    if name: stmt = stmt.where(Student.name.contains(name))
+    if id_card: stmt = stmt.where(Student.id_card_number.contains(id_card))
+    if district: stmt = stmt.where(Student.district_county.contains(district))
+    if entity_name: stmt = stmt.join(Student.entities).where(BusinessEntity.entity_name.contains(entity_name))
+    return stmt
+
+
+@router.get("/auth/me")
+def me(user: User = Depends(current_user)) -> ApiResponse:
+    return ApiResponse(data={"id": user.id, "username": user.username})
+
+
+@router.get("/students")
+def students(name: str | None = None, id_card: str | None = None, district: str | None = None, entity_name: str | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
+    stmt = student_query(name, id_card, district, entity_name)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(stmt.order_by(Student.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    return {"items": [{"id": s.id, "name": s.name, "id_card_number": mask_id_card(s.id_card_number), "phone": mask_phone(s.phone), "district_county": s.district_county, "status": s.status, "age": s.age} for s in rows], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/students/{student_id}")
+def student_detail(student_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id))
+    if not student: raise HTTPException(404, "学员不存在")
+    return ApiResponse(data={"id": student.id, "name": student.name, "id_card_number": student.id_card_number, "age": student.age, "phone": student.phone, "district_county": student.district_county, "political_status": student.political_status, "professional_title": student.professional_title, "status": student.status, "honors": [{"id": h.id, "honor_time": h.honor_time, "honor_level": h.honor_level, "honor_description": h.honor_description} for h in student.honors if not h.deleted_at], "entities": [{"id": e.id, "entity_name": e.entity_name, "entity_type": e.entity_type, "registered_address": e.registered_address, "revenues": [{"id": r.id, "year": r.year, "operating_revenue": r.operating_revenue} for r in e.revenues], "industries": [{"id": i.id, "industry_name": i.industry_name} for i in e.industries]} for e in student.entities if not e.deleted_at]})
+
+
+@router.get("/students/by-id-card/{id_card_number}")
+def by_id_card(id_card_number: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    student = db.scalar(select(Student).where(Student.id_card_number == id_card_number.upper()))
+    if not student: raise HTTPException(404, "学员不存在")
+    return student_detail(student.id, db, user)
+
+
+@router.patch("/students/{student_id}/basic-info")
+def update_student(student_id: int, payload: StudentUpdate, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    student = db.get(Student, student_id)
+    if not student: raise HTTPException(404, "学员不存在")
+    changes = payload.model_dump(exclude_unset=True); before = {k: getattr(student, k) for k in changes}
+    for key, value in changes.items(): setattr(student, key, value)
+    add_audit(db, user_id=user.id, action="STUDENT_UPDATE", target_table="students", target_id=student.id, before=before, after=changes, ip_address=request.client.host if request.client else None)
+    db.commit(); return ApiResponse(data={"id": student.id}, message="学员信息已更新")
+
+
+@router.post("/students/{student_id}/honors")
+def add_honor(student_id: int, payload: HonorCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not db.get(Student, student_id): raise HTTPException(404, "学员不存在")
+    honor = HonorRecord(student_id=student_id, **payload.model_dump()); db.add(honor); db.flush()
+    add_audit(db, user_id=user.id, action="HONOR_CREATE", target_table="honor_records", target_id=honor.id, after=payload.model_dump(mode="json")); db.commit()
+    return ApiResponse(data={"id": honor.id}, message="荣誉已添加")
+
+
+@router.delete("/honors/{honor_id}")
+def delete_honor(honor_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    honor = db.get(HonorRecord, honor_id)
+    if not honor: raise HTTPException(404, "荣誉不存在")
+    from datetime import datetime
+    honor.deleted_at = datetime.utcnow(); add_audit(db, user_id=user.id, action="HONOR_DELETE", target_table="honor_records", target_id=honor.id); db.commit()
+    return ApiResponse(message="荣誉已删除")
+
+
+@router.patch("/business-entities/{entity_id}")
+def update_entity(entity_id: int, payload: EntityUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    entity = db.get(BusinessEntity, entity_id)
+    if not entity: raise HTTPException(404, "经营主体不存在")
+    changes = payload.model_dump(exclude_unset=True); before = {k: getattr(entity, k) for k in changes}
+    for key, value in changes.items(): setattr(entity, key, value)
+    add_audit(db, user_id=user.id, action="ENTITY_UPDATE", target_table="business_entities", target_id=entity.id, before=before, after=changes); db.commit()
+    return ApiResponse(data={"id": entity.id}, message="经营主体已更新")
+
+
+@router.post("/business-entities/{entity_id}/revenue")
+def add_revenue(entity_id: int, payload: RevenueCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not db.get(BusinessEntity, entity_id): raise HTTPException(404, "经营主体不存在")
+    record = AnnualRevenueRecord(business_entity_id=entity_id, **payload.model_dump()); db.add(record); db.flush(); add_audit(db, user_id=user.id, action="REVENUE_CREATE", target_table="annual_revenue_records", target_id=record.id, after=payload.model_dump()); db.commit()
+    return ApiResponse(data={"id": record.id}, message="年度营收已添加")
+
+
+@router.post("/business-entities/{entity_id}/industries")
+def add_industry(entity_id: int, payload: IndustryCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not db.get(BusinessEntity, entity_id): raise HTTPException(404, "经营主体不存在")
+    record = MainIndustry(business_entity_id=entity_id, **payload.model_dump()); db.add(record); db.flush(); add_audit(db, user_id=user.id, action="INDUSTRY_CREATE", target_table="main_industries", target_id=record.id, after=payload.model_dump()); db.commit()
+    return ApiResponse(data={"id": record.id}, message="主营产业已添加")
+
+
+@router.post("/import/preview")
+async def import_preview(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "仅支持 .xlsx 文件")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as temp:
+        temp.write(await file.read()); path = Path(temp.name)
+    try: batch = create_preview(db, path, file.filename, user.id, get_settings().upload_dir)
+    finally: path.unlink(missing_ok=True)
+    return ApiResponse(data={"batch_id": batch.id, "total_rows": batch.total_rows, "new_rows": batch.new_rows, "updated_rows": batch.updated_rows, "failed_rows": batch.failed_rows, "warning_count": batch.warning_count}, message="预览完成")
+
+
+@router.post("/import/batches/{batch_id}/commit")
+def import_commit(batch_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    batch = db.get(ImportBatch, batch_id)
+    if not batch: raise HTTPException(404, "导入批次不存在")
+    try: commit_batch(db, batch, user.id)
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+    return ApiResponse(data={"batch_id": batch.id}, message="导入完成")
+
+
+@router.get("/import/batches")
+def batches(db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    rows = db.scalars(select(ImportBatch).order_by(ImportBatch.id.desc()).limit(100)).all()
+    return ApiResponse(data=[{"id": r.id, "file_name": r.file_name, "status": r.status, "total_rows": r.total_rows, "success_rows": r.success_rows, "failed_rows": r.failed_rows, "started_at": r.started_at} for r in rows])
+
+
+@router.get("/import/batches/{batch_id}/errors")
+def batch_errors(batch_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    rows = db.scalars(select(ImportError).where(ImportError.import_batch_id == batch_id)).all()
+    return ApiResponse(data=[{"row": r.excel_row_number, "field": r.field_name, "message": r.error_message, "severity": r.severity} for r in rows])
+
+
+@router.get("/export/students.xlsx")
+def export_students(name: str | None = None, district: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    rows = db.scalars(student_query(name, None, district, None).order_by(Student.id)).all()
+    book = Workbook(); sheet = book.active; sheet.title = "学员名单"; sheet.append(["姓名", "身份证号", "性别", "出生日期", "年龄", "所在区县", "手机号", "状态"])
+    for s in rows: sheet.append([s.name, s.id_card_number, s.gender, s.birth_date, s.age, s.district_county, s.phone, s.status])
+    stream = tempfile.SpooledTemporaryFile(); book.save(stream); stream.seek(0)
+    add_audit(db, user_id=user.id, action="EXPORT_STUDENTS", target_table="students", after={"count": len(rows)}); db.commit()
+    return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=students.xlsx"})
+
+
+@router.get("/audit-logs")
+def audit_logs(action: str | None = None, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    stmt = select(AuditLog).order_by(AuditLog.id.desc()).limit(200)
+    if action: stmt = stmt.where(AuditLog.action == action)
+    rows = db.scalars(stmt).all(); return ApiResponse(data=[{"id": r.id, "action": r.action, "target_table": r.target_table, "target_id": r.target_id, "created_at": r.created_at, "before": r.before_data, "after": r.after_data} for r in rows])
+
+
+@router.post("/backups")
+def backup(db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = create_backup(db, user.id); add_audit(db, user_id=user.id, action="BACKUP_CREATE", target_table="backup_records", target_id=record.id); db.commit()
+    return ApiResponse(data={"id": record.id, "file_size": record.file_size}, message="备份已创建")
+
+
+@router.get("/backups")
+def backups(db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    rows = db.scalars(select(BackupRecord).order_by(BackupRecord.id.desc())).all(); return ApiResponse(data=[{"id": r.id, "file": Path(r.backup_file_path).name, "size": r.file_size, "type": r.backup_type, "created_at": r.created_at} for r in rows])
+
+
+@router.get("/backups/{backup_id}/download")
+def download_backup(backup_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)):
+    record = db.get(BackupRecord, backup_id)
+    if not record or not Path(record.backup_file_path).exists(): raise HTTPException(404, "备份不存在")
+    return FileResponse(record.backup_file_path, filename=Path(record.backup_file_path).name)
+
+
+@router.post("/backups/restore")
+async def restore_backup(file: UploadFile = File(...), db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as temp:
+        temp.write(await file.read()); path = Path(temp.name)
+    try:
+        restore_database(db, path, user.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        path.unlink(missing_ok=True)
+    return ApiResponse(message="数据库已恢复，请重新登录")
