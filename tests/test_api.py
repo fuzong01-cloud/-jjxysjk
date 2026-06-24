@@ -30,3 +30,9 @@ def test_add_honor(authenticated_client):
     result = authenticated_client.post(f"/api/v1/students/{student_id}/honors", json={"honor_level": "市级", "honor_description": "优秀学员"})
     assert result.status_code == 200
 
+
+def test_change_password(authenticated_client):
+    result = authenticated_client.post("/api/v1/auth/password", json={"current_password": "TestPass123!", "new_password": "NewTestPass456!"})
+    assert result.status_code == 200
+    authenticated_client.post("/logout")
+    assert authenticated_client.post("/login", data={"username": "admin", "password": "NewTestPass456!"}).status_code == 200

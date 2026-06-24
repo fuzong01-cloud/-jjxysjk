@@ -98,3 +98,9 @@ def backups_page(request: Request, db: Session = Depends(get_db)):
     rows = db.scalars(select(BackupRecord).order_by(BackupRecord.id.desc())).all()
     return templates.TemplateResponse(request, "backups.html", {"user": user, "backups": rows})
 
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    user = _user(request, db)
+    if not user: return RedirectResponse("/login")
+    return templates.TemplateResponse(request, "settings.html", {"user": user})

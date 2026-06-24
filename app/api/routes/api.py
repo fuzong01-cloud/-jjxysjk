@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.auth import current_user
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.security import mask_id_card, mask_phone
+from app.core.security import hash_password, mask_id_card, mask_phone, verify_password
 from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, BusinessEntity, HonorRecord, ImportBatch, ImportError, MainIndustry, Student, User
-from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, RevenueCreate, StudentUpdate
+from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentUpdate
 from app.services.audit_service import add_audit
 from app.services.backup_service import create_backup, restore_database
 from app.services.import_service import commit_batch, create_preview
@@ -33,6 +33,18 @@ def student_query(name: str | None, id_card: str | None, district: str | None, e
 @router.get("/auth/me")
 def me(user: User = Depends(current_user)) -> ApiResponse:
     return ApiResponse(data={"id": user.id, "username": user.username})
+
+
+@router.post("/auth/password")
+def change_password(payload: PasswordChange, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(400, "当前密码不正确")
+    if payload.current_password == payload.new_password:
+        raise HTTPException(400, "新密码不能与当前密码相同")
+    user.password_hash = hash_password(payload.new_password)
+    add_audit(db, user_id=user.id, action="PASSWORD_CHANGE", target_table="users", target_id=user.id)
+    db.commit()
+    return ApiResponse(message="密码已修改")
 
 
 @router.get("/students")

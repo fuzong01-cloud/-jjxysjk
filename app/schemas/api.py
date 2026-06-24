@@ -50,5 +50,10 @@ class ApiResponse(BaseModel):
     message: str = "success"
 
 
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=10)
+
+
 class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
