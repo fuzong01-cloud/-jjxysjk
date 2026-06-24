@@ -94,6 +94,24 @@ def update_entity(entity_id: int, payload: EntityUpdate, db: Session = Depends(g
     return ApiResponse(data={"id": entity.id}, message="经营主体已更新")
 
 
+@router.get("/business-entities")
+def entity_list(entity_name: str | None = None, student_name: str | None = None, district: str | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
+    stmt = select(BusinessEntity).join(BusinessEntity.student).where(BusinessEntity.deleted_at.is_(None))
+    if entity_name: stmt = stmt.where(BusinessEntity.entity_name.contains(entity_name))
+    if student_name: stmt = stmt.where(Student.name.contains(student_name))
+    if district: stmt = stmt.where(Student.district_county.contains(district))
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
+    return {"items": [{"id": e.id, "entity_name": e.entity_name, "entity_type": e.entity_type, "student_id": e.student_id, "student_name": e.student.name} for e in rows], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/business-entities/{entity_id}")
+def entity_detail(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    entity = db.scalar(select(BusinessEntity).options(selectinload(BusinessEntity.revenues), selectinload(BusinessEntity.industries)).where(BusinessEntity.id == entity_id))
+    if not entity: raise HTTPException(404, "经营主体不存在")
+    return ApiResponse(data={"id": entity.id, "student_id": entity.student_id, "entity_name": entity.entity_name, "entity_intro": entity.entity_intro, "entity_type": entity.entity_type, "entity_subtype": entity.entity_subtype, "entity_industry_type": entity.entity_industry_type, "registered_address": entity.registered_address, "unified_social_credit_code": entity.unified_social_credit_code})
+
+
 @router.post("/business-entities/{entity_id}/revenue")
 def add_revenue(entity_id: int, payload: RevenueCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
     if not db.get(BusinessEntity, entity_id): raise HTTPException(404, "经营主体不存在")
@@ -101,11 +119,43 @@ def add_revenue(entity_id: int, payload: RevenueCreate, db: Session = Depends(ge
     return ApiResponse(data={"id": record.id}, message="年度营收已添加")
 
 
+@router.get("/business-entities/{entity_id}/revenue")
+def revenues(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    rows = db.scalars(select(AnnualRevenueRecord).where(AnnualRevenueRecord.business_entity_id == entity_id).order_by(AnnualRevenueRecord.year.desc())).all()
+    return ApiResponse(data=[{"id": r.id, "year": r.year, "operating_revenue": r.operating_revenue, "net_profit": r.net_profit} for r in rows])
+
+
+@router.patch("/revenue/{revenue_id}")
+def update_revenue(revenue_id: int, payload: RevenueCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(AnnualRevenueRecord, revenue_id)
+    if not record: raise HTTPException(404, "年度营收不存在")
+    changes = payload.model_dump(exclude_unset=True); before = {k: getattr(record, k) for k in changes}
+    for key, value in changes.items(): setattr(record, key, value)
+    add_audit(db, user_id=user.id, action="REVENUE_UPDATE", target_table="annual_revenue_records", target_id=record.id, before=before, after=changes); db.commit()
+    return ApiResponse(data={"id": record.id}, message="年度营收已更新")
+
+
 @router.post("/business-entities/{entity_id}/industries")
 def add_industry(entity_id: int, payload: IndustryCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
     if not db.get(BusinessEntity, entity_id): raise HTTPException(404, "经营主体不存在")
     record = MainIndustry(business_entity_id=entity_id, **payload.model_dump()); db.add(record); db.flush(); add_audit(db, user_id=user.id, action="INDUSTRY_CREATE", target_table="main_industries", target_id=record.id, after=payload.model_dump()); db.commit()
     return ApiResponse(data={"id": record.id}, message="主营产业已添加")
+
+
+@router.get("/business-entities/{entity_id}/industries")
+def industries(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    rows = db.scalars(select(MainIndustry).where(MainIndustry.business_entity_id == entity_id)).all()
+    return ApiResponse(data=[{"id": r.id, "industry_name": r.industry_name, "three_year_total_income": r.three_year_total_income, "operation_years": r.operation_years} for r in rows])
+
+
+@router.patch("/industries/{industry_id}")
+def update_industry(industry_id: int, payload: IndustryCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(MainIndustry, industry_id)
+    if not record: raise HTTPException(404, "主营产业不存在")
+    changes = payload.model_dump(exclude_unset=True); before = {k: getattr(record, k) for k in changes}
+    for key, value in changes.items(): setattr(record, key, value)
+    add_audit(db, user_id=user.id, action="INDUSTRY_UPDATE", target_table="main_industries", target_id=record.id, before=before, after=changes); db.commit()
+    return ApiResponse(data={"id": record.id}, message="主营产业已更新")
 
 
 @router.post("/import/preview")
