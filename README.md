@@ -2,6 +2,8 @@
 
 面向继续教育学院内部使用的学员档案管理系统。支持原始 Excel 预览导入、学员检索和维护、荣誉及经营数据管理、Excel 导出、审计日志以及 SQLite 备份恢复。
 
+普通用户请先阅读：[用户操作说明书](docs/admin_user_manual.md)。
+
 ## 快速启动（Windows）
 
 ```powershell
@@ -45,4 +47,3 @@ notepad .env
 参见 `.env.example`。默认仅监听本机 `127.0.0.1`。系统模型避免 SQLite 专有字段，后续可通过 `DATABASE_URL` 迁移到 PostgreSQL。
 
 更完整说明见 [系统文档](docs/system_guide.md)。
-
