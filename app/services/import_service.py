@@ -54,6 +54,52 @@ def create_preview(db: Session, source: Path, original_name: str, user_id: int |
     return batch
 
 
+def preview_rows_for_batch(db: Session, batch: ImportBatch, limit: int = 100) -> list[dict[str, Any]]:
+    """Return human-checkable rows for the import confirmation page.
+
+    This is intentionally read-only: it parses the uploaded copy saved for the
+    preview batch and summarizes which seven Excel modules contain data.
+    """
+    existing = set(db.scalars(select(Student.id_card_number)).all())
+    _, rows, _ = parse_workbook(Path(batch.stored_file_path))
+    preview: list[dict[str, Any]] = []
+    for item in rows[:limit]:
+        raw_card = clean_text(item.basic.get("id_card_number"))
+        try:
+            card = normalize_id_card(raw_card, validate_checksum=False)
+            action = "更新" if card in existing else "新增"
+            has_error = False
+        except ValueError:
+            card = raw_card
+            action = "错误"
+            has_error = True
+        education_values = [clean_text(v) for v in item.education.values()]
+        entity_values = [clean_text(v) for v in item.entity.values()]
+        cultivation_values = [clean_text(v) for v in item.cultivation.values()]
+        preview.append(
+            {
+                "row": item.row_number,
+                "action": action,
+                "has_error": has_error,
+                "name": clean_text(item.basic.get("name")),
+                "id_card_number": card,
+                "district_county": clean_text(item.basic.get("district_county")),
+                "phone": clean_text(item.basic.get("phone")),
+                "business_entity_name": clean_text(item.entity.get("entity_name")),
+                "modules": {
+                    "basic_info": bool(clean_text(item.basic.get("name")) or card),
+                    "education": any(education_values),
+                    "honors": len(item.honors),
+                    "business_entities": any(entity_values),
+                    "annual_revenues": len(item.revenues),
+                    "main_industries": len(item.industries),
+                    "cultivations": any(cultivation_values),
+                },
+            }
+        )
+    return preview
+
+
 def _convert_row(item: ParsedRow) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     data = {key: clean_text(value) for key, value in item.basic.items()}
     errors: list[tuple[str, str]] = []

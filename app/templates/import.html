@@ -1,8 +1,71 @@
 {% extends "base.html" %}
 {% block title %}数据导入{% endblock %}
 {% block content %}
-<header class="page-head"><div><p class="eyebrow">Excel 导入流水线</p><h1>先预览，再写入</h1><p>必须使用扁平名单：第一行为字段名，每行一位学员；“学员姓名”和“身份证号”必填。列顺序不限。</p></div><a class="button secondary" href="/api/v1/import/template.xlsx">下载标准模板</a></header>
-<section class="drop panel"><input id="excelFile" type="file" accept=".xlsx"><button id="previewBtn">上传并检查</button><p class="hint">支持 .xlsx。原文件不会被修改；错误和警告都会保留原始行号。</p><div id="previewResult"></div></section>
-<section class="panel"><h2>导入记录</h2><table><tr><th>批次</th><th>文件</th><th>状态</th><th>总行数</th><th>成功/失败</th><th></th></tr>{% for b in batches %}<tr><td>#{{ b.id }}</td><td>{{ b.file_name }}</td><td><span class="tag">{{ b.status }}</span></td><td>{{ b.total_rows }}</td><td>{{ b.success_rows }} / {{ b.failed_rows }}</td><td>{% if b.status == 'preview' %}<button onclick="commitBatch({{ b.id }})">确认写入</button>{% else %}<a href="/api/v1/import/batches/{{ b.id }}/errors">错误与警告</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="empty">上传第一份 Excel 后，批次会显示在这里。</td></tr>{% endfor %}</table></section>
+<header class="page-head"><div><p class="eyebrow">Excel 导入流水线</p><h1>先预览，再确认写入</h1><p>必须使用扁平名单：第一行为字段名，每行一位学员；“学员姓名”和“身份证号”必填。列顺序不限。</p></div><a class="button secondary" href="/api/v1/import/template.xlsx">下载标准模板</a></header>
+<section class="drop panel"><input id="excelFile" type="file" accept=".xlsx"><button id="previewBtn">上传并生成确认预览</button><p class="hint">支持 .xlsx。原文件不会被修改；确认前只做读取和校验，不写入学员档案。</p><div id="previewResult"></div></section>
+<section class="panel"><h2>导入记录</h2><table><tr><th>批次</th><th>文件</th><th>状态</th><th>总行数</th><th>成功/失败</th><th></th></tr>{% for b in batches %}<tr><td>#{{ b.id }}</td><td>{{ b.file_name }}</td><td><span class="tag">{{ b.status }}</span></td><td>{{ b.total_rows }}</td><td>{{ b.success_rows }} / {{ b.failed_rows }}</td><td>{% if b.status == 'preview' %}<button class="secondary" onclick="loadBatchPreview({{ b.id }})">查看预览/确认</button>{% else %}<a href="/api/v1/import/batches/{{ b.id }}/errors">错误与警告</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="empty">上传第一份 Excel 后，批次会显示在这里。</td></tr>{% endfor %}</table></section>
 {% endblock %}
-{% block scripts %}<script>previewBtn.onclick=async()=>{if(!excelFile.files[0])return alert('请选择 Excel 文件');previewBtn.disabled=true;const f=new FormData();f.append('file',excelFile.files[0]);const r=await fetch('/api/v1/import/preview',{method:'POST',body:f}),j=await r.json();previewBtn.disabled=false;if(!r.ok)return alert(j.detail||'检查失败');previewResult.innerHTML=`<div class="preview-box"><b>${j.data.total_rows}</b> 行已检查 · 新增 ${j.data.new_rows} · 更新 ${j.data.updated_rows} · 错误 ${j.data.failed_rows} · 警告 ${j.data.warning_count}<button onclick="commitBatch(${j.data.batch_id})">确认写入数据库</button></div>`};async function commitBatch(id){if(!confirm('确认按预览结果更新数据库？'))return;const r=await fetch(`/api/v1/import/batches/${id}/commit`,{method:'POST'}),j=await r.json();if(r.ok){alert('导入完成');location.reload()}else alert(j.detail||'导入失败')}</script>{% endblock %}
+{% block scripts %}
+<script>
+const moduleLabels={basic_info:'基本',education:'教育',honors:'荣誉',business_entities:'主体',annual_revenues:'营收',main_industries:'产业',cultivations:'培育'};
+
+previewBtn.onclick=async()=>{
+  if(!excelFile.files[0])return alert('请选择 Excel 文件');
+  previewBtn.disabled=true;
+  const f=new FormData();
+  f.append('file',excelFile.files[0]);
+  const r=await fetch('/api/v1/import/preview',{method:'POST',body:f});
+  const j=await r.json();
+  previewBtn.disabled=false;
+  if(!r.ok)return alert(j.detail||'检查失败');
+  renderPreview(j.data);
+};
+
+async function loadBatchPreview(id){
+  const r=await fetch(`/api/v1/import/batches/${id}/preview`);
+  const j=await r.json();
+  if(!r.ok)return alert(j.detail||'读取预览失败');
+  renderPreview(j.data);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function escapeHtml(value){
+  return String(value??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s]));
+}
+
+function moduleTags(modules){
+  return Object.entries(moduleLabels).map(([key,label])=>{
+    const value=modules[key];
+    const text=typeof value==='number'?`${label}${value?`×${value}`:''}`:label;
+    return value?`<span class="tag">${text}</span>`:`<span class="tag muted">${label}无</span>`;
+  }).join(' ');
+}
+
+function renderPreview(data){
+  const rows=(data.rows||[]).map(row=>`<tr>
+    <td>${row.row}</td>
+    <td><span class="tag">${escapeHtml(row.action)}</span></td>
+    <td>${escapeHtml(row.name)||'<span class="muted">未填写</span>'}<small class="mono">${escapeHtml(row.id_card_number)}</small></td>
+    <td>${escapeHtml(row.district_county)||'—'}</td>
+    <td>${escapeHtml(row.business_entity_name)||'—'}</td>
+    <td>${moduleTags(row.modules)}</td>
+  </tr>`).join('');
+  const more=data.total_rows>data.preview_limit?`<p class="hint">页面只显示前 ${data.preview_limit} 行用于确认，确认写入时会处理全部 ${data.total_rows} 行。</p>`:'';
+  const blockCommit=data.failed_rows>0;
+  previewResult.innerHTML=`<div class="preview-box">
+    <div class="panel-title"><div><b>${data.total_rows}</b> 行已读取 · 可写入 ${data.success_rows} · 新增 ${data.new_rows} · 更新 ${data.updated_rows} · 错误 ${data.failed_rows} · 警告 ${data.warning_count}</div>
+    <button ${blockCommit?'disabled':''} onclick="commitBatch(${data.batch_id})">确认写入数据库</button></div>
+    ${blockCommit?'<p class="error">存在错误行，请先修正 Excel 后重新上传；系统不会在有错误时写入。</p>':'<p class="hint">请核对下面预览。确认后才会正式写入数据库。</p>'}
+    ${more}
+    <div style="overflow:auto"><table><tr><th>Excel 行号</th><th>动作</th><th>学员</th><th>区县</th><th>经营主体</th><th>识别到的模块</th></tr>${rows||'<tr><td colspan="6" class="empty">没有可预览的数据。</td></tr>'}</table></div>
+  </div>`;
+}
+
+async function commitBatch(id){
+  if(!confirm('确认按当前预览结果写入数据库？写入后会新增或更新对应学员档案。'))return;
+  const r=await fetch(`/api/v1/import/batches/${id}/commit`,{method:'POST'});
+  const j=await r.json();
+  if(r.ok){alert('导入完成');location.reload()}else alert(j.detail||'导入失败');
+}
+</script>
+{% endblock %}

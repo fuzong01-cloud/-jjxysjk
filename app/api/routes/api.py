@@ -15,7 +15,7 @@ from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, Bus
 from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentUpdate
 from app.services.audit_service import add_audit
 from app.services.backup_service import create_backup, restore_database
-from app.services.import_service import commit_batch, create_preview
+from app.services.import_service import commit_batch, create_preview, preview_rows_for_batch
 
 
 router = APIRouter(prefix="/api/v1")
@@ -241,7 +241,20 @@ async def import_preview(file: UploadFile = File(...), db: Session = Depends(get
         temp.write(await file.read()); path = Path(temp.name)
     try: batch = create_preview(db, path, file.filename, user.id, get_settings().upload_dir)
     finally: path.unlink(missing_ok=True)
-    return ApiResponse(data={"batch_id": batch.id, "total_rows": batch.total_rows, "new_rows": batch.new_rows, "updated_rows": batch.updated_rows, "failed_rows": batch.failed_rows, "warning_count": batch.warning_count}, message="预览完成")
+    return ApiResponse(
+        data={
+            "batch_id": batch.id,
+            "total_rows": batch.total_rows,
+            "success_rows": batch.success_rows,
+            "new_rows": batch.new_rows,
+            "updated_rows": batch.updated_rows,
+            "failed_rows": batch.failed_rows,
+            "warning_count": batch.warning_count,
+            "preview_limit": 100,
+            "rows": preview_rows_for_batch(db, batch, limit=100),
+        },
+        message="预览完成",
+    )
 
 
 @router.get("/import/template.xlsx")
@@ -272,6 +285,8 @@ def import_template(_user: User = Depends(current_user)):
 def import_commit(batch_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
     batch = db.get(ImportBatch, batch_id)
     if not batch: raise HTTPException(404, "导入批次不存在")
+    if batch.failed_rows:
+        raise HTTPException(400, "预览存在错误行，请修正 Excel 后重新上传")
     try: commit_batch(db, batch, user.id)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     return ApiResponse(data={"batch_id": batch.id}, message="导入完成")
@@ -281,6 +296,28 @@ def import_commit(batch_id: int, db: Session = Depends(get_db), user: User = Dep
 def batches(db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     rows = db.scalars(select(ImportBatch).order_by(ImportBatch.id.desc()).limit(100)).all()
     return ApiResponse(data=[{"id": r.id, "file_name": r.file_name, "status": r.status, "total_rows": r.total_rows, "success_rows": r.success_rows, "failed_rows": r.failed_rows, "started_at": r.started_at} for r in rows])
+
+
+@router.get("/import/batches/{batch_id}/preview")
+def batch_preview(batch_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    batch = db.get(ImportBatch, batch_id)
+    if not batch:
+        raise HTTPException(404, "导入批次不存在")
+    return ApiResponse(
+        data={
+            "batch_id": batch.id,
+            "file_name": batch.file_name,
+            "status": batch.status,
+            "total_rows": batch.total_rows,
+            "success_rows": batch.success_rows,
+            "new_rows": batch.new_rows,
+            "updated_rows": batch.updated_rows,
+            "failed_rows": batch.failed_rows,
+            "warning_count": batch.warning_count,
+            "preview_limit": 100,
+            "rows": preview_rows_for_batch(db, batch, limit=100),
+        }
+    )
 
 
 @router.get("/import/batches/{batch_id}/errors")

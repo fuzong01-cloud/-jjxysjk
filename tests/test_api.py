@@ -1,5 +1,6 @@
 from app.core.database import SessionLocal
 from app.models.entities import Student
+from openpyxl import Workbook
 
 
 def test_health(client):
@@ -53,3 +54,42 @@ def test_import_template_download(authenticated_client):
     result = authenticated_client.get("/api/v1/import/template.xlsx")
     assert result.status_code == 200
     assert result.headers["content-type"].startswith("application/vnd.openxmlformats")
+
+
+def test_import_confirmation_preview_rows(authenticated_client, tmp_path):
+    path = tmp_path / "preview.xlsx"
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"
+    sheet.append(["学员姓名", "身份证号", "所在区县", "新型经营主体名称", "个人获得荣誉情况1"])
+    sheet.append(["预览学员", "11010519491231002X", "北京市延庆区", "预览合作社", "优秀学员"])
+    book.save(path)
+
+    with path.open("rb") as handle:
+        result = authenticated_client.post(
+            "/api/v1/import/preview",
+            files={"file": ("preview.xlsx", handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+
+    assert result.status_code == 200
+    data = result.json()["data"]
+    assert data["rows"][0]["name"] == "预览学员"
+    assert data["rows"][0]["business_entity_name"] == "预览合作社"
+    assert data["rows"][0]["modules"]["honors"] == 1
+    assert data["rows"][0]["modules"]["business_entities"] is True
+
+
+def test_import_commit_rejects_failed_preview(authenticated_client, tmp_path):
+    path = tmp_path / "bad-preview.xlsx"
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"
+    sheet.append(["学员姓名", "身份证号"])
+    sheet.append(["错误学员", ""])
+    book.save(path)
+
+    with path.open("rb") as handle:
+        result = authenticated_client.post(
+            "/api/v1/import/preview",
+            files={"file": ("bad-preview.xlsx", handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+
+    batch_id = result.json()["data"]["batch_id"]
+    commit = authenticated_client.post(f"/api/v1/import/batches/{batch_id}/commit")
+    assert commit.status_code == 400
