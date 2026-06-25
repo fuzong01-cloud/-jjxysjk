@@ -22,6 +22,16 @@ class HonorCreate(BaseModel):
     honor_description: str = Field(min_length=1)
 
 
+class EducationUpdate(BaseModel):
+    education_level: str | None = None
+    graduate_school: str | None = None
+    major: str | None = None
+    certificate_number: str | None = None
+    learning_experience: str | None = None
+    work_experience: str | None = None
+    training_experience: str | None = None
+
+
 class EntityUpdate(BaseModel):
     entity_name: str | None = None
     entity_intro: str | None = None
@@ -37,12 +47,25 @@ class RevenueCreate(BaseModel):
     year: int = Field(ge=1900, le=2100)
     operating_revenue: float | None = None
     net_profit: float | None = None
+    fixed_asset_net_value: float | None = None
+    total_assets: float | None = None
+    total_liabilities: float | None = None
+    employee_count: int | None = None
+    current_assets: float | None = None
+    management_expense: float | None = None
+    government_subsidy_amount: float | None = None
 
 
 class IndustryCreate(BaseModel):
     industry_name: str = Field(min_length=1)
     three_year_total_income: float | None = None
     operation_years: int | None = Field(default=None, ge=0)
+
+
+class CultivationCreate(BaseModel):
+    cultivation_year: int | None = Field(default=None, ge=1900, le=2100)
+    cultivation_needs: str | None = None
+    training_experience: str | None = None
 
 
 class ApiResponse(BaseModel):

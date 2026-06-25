@@ -81,6 +81,22 @@ def test_bulk_delete_students(authenticated_client):
     assert any(row["action"] == "STUDENT_BULK_DELETE" for row in logs)
 
 
+def test_bulk_export_selected_students(authenticated_client):
+    with SessionLocal() as db:
+        one = Student(name="批量导出甲", id_card_number="11010519491231002X")
+        two = Student(name="批量导出乙", id_card_number="110105194912310018")
+        db.add_all([one, two]); db.commit(); ids = [one.id, two.id]
+
+    page = authenticated_client.get("/students")
+    assert "批量处理" in page.text and "已选择 0 位学员" not in page.text
+
+    result = authenticated_client.get("/api/v1/export/students.xlsx", params={"ids": ",".join(map(str, ids))})
+    assert result.status_code == 200
+    assert result.headers["content-type"].startswith("application/vnd.openxmlformats")
+    logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
+    assert any(row["action"] == "EXPORT_SELECTED_STUDENTS" for row in logs)
+
+
 def test_import_template_download(authenticated_client):
     result = authenticated_client.get("/api/v1/import/template.xlsx")
     assert result.status_code == 200

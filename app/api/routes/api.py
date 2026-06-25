@@ -372,12 +372,21 @@ def batch_errors(batch_id: int, db: Session = Depends(get_db), _user: User = Dep
 
 
 @router.get("/export/students.xlsx")
-def export_students(name: str | None = None, district: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    rows = db.scalars(student_query(name, None, district, None).order_by(Student.id)).all()
+def export_students(name: str | None = None, district: str | None = None, ids: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if ids:
+        try:
+            selected_ids = [int(item) for item in ids.split(",") if item.strip()]
+        except ValueError as exc:
+            raise HTTPException(400, "学员 ID 格式不正确") from exc
+        rows = db.scalars(select(Student).where(Student.id.in_(selected_ids), Student.deleted_at.is_(None)).order_by(Student.id)).all()
+        export_action = "EXPORT_SELECTED_STUDENTS"
+    else:
+        rows = db.scalars(student_query(name, None, district, None).order_by(Student.id)).all()
+        export_action = "EXPORT_STUDENTS"
     book = Workbook(); sheet = book.active; sheet.title = "学员名单"; sheet.append(["姓名", "身份证号", "性别", "出生日期", "年龄", "所在区县", "手机号", "状态"])
     for s in rows: sheet.append([s.name, s.id_card_number, s.gender, s.birth_date, s.age, s.district_county, s.phone, s.status])
     stream = tempfile.SpooledTemporaryFile(); book.save(stream); stream.seek(0)
-    add_audit(db, user_id=user.id, action="EXPORT_STUDENTS", target_table="students", after={"count": len(rows)}); db.commit()
+    add_audit(db, user_id=user.id, action=export_action, target_table="students", after={"count": len(rows)}); db.commit()
     return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=students.xlsx"})
 
 
