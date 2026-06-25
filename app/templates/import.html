@@ -3,7 +3,7 @@
 {% block content %}
 <header class="page-head"><div><p class="eyebrow">Excel 导入流水线</p><h1>先预览，再确认写入</h1><p>必须使用扁平名单：第一行为字段名，每行一位学员；“学员姓名”和“身份证号”必填。列顺序不限。</p></div><a class="button secondary" href="/api/v1/import/template.xlsx">下载标准模板</a></header>
 <section class="drop panel"><input id="excelFile" type="file" accept=".xlsx"><button id="previewBtn">上传并生成确认预览</button><p class="hint">支持 .xlsx。原文件不会被修改；确认前只做读取和校验，不写入学员档案。</p><div id="previewResult"></div></section>
-<section class="panel"><h2>导入记录</h2><table><tr><th>批次</th><th>文件</th><th>状态</th><th>总行数</th><th>成功/失败</th><th></th></tr>{% for b in batches %}<tr><td>#{{ b.id }}</td><td>{{ b.file_name }}</td><td><span class="tag">{{ b.status }}</span></td><td>{{ b.total_rows }}</td><td>{{ b.success_rows }} / {{ b.failed_rows }}</td><td>{% if b.status == 'preview' %}<button class="secondary" onclick="loadBatchPreview({{ b.id }})">查看预览/确认</button>{% else %}<a href="/api/v1/import/batches/{{ b.id }}/errors">错误与警告</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="empty">上传第一份 Excel 后，批次会显示在这里。</td></tr>{% endfor %}</table></section>
+<section class="panel"><h2>导入记录</h2><table><tr><th>批次</th><th>文件</th><th>状态</th><th>总行数</th><th>成功/失败</th><th></th></tr>{% for b in batches %}<tr><td>#{{ b.id }}</td><td>{{ b.file_name }}</td><td><span class="tag">{{ b.status }}</span></td><td>{{ b.total_rows }}</td><td>{{ b.success_rows }} / {{ b.failed_rows }}</td><td>{% if b.status == 'preview' %}<button class="secondary" data-batch-id="{{ b.id }}" onclick="loadBatchPreview(this.dataset.batchId)">查看预览/确认</button>{% else %}<a href="/api/v1/import/batches/{{ b.id }}/errors">错误与警告</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6" class="empty">上传第一份 Excel 后，批次会显示在这里。</td></tr>{% endfor %}</table></section>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -30,7 +30,12 @@ async function loadBatchPreview(id){
 }
 
 function escapeHtml(value){
-  return String(value??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[s]));
+  return String(value??'')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#039;');
 }
 
 function moduleTags(modules){
