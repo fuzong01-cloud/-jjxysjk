@@ -207,14 +207,7 @@ def upsert_education(student_id: int, payload: EducationUpdate, db: Session = De
 
 @router.delete("/students/{student_id}/education")
 def delete_education(student_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
-    student = db.scalar(select(Student).options(selectinload(Student.education)).where(Student.id == student_id, Student.deleted_at.is_(None)))
-    if not student or student.education is None:
-        raise HTTPException(404, "受教育情况不存在")
-    target_id = student.education.id
-    db.delete(student.education)
-    add_audit(db, user_id=user.id, action="EDUCATION_DELETE", target_table="education_records", target_id=target_id)
-    db.commit()
-    return ApiResponse(message="受教育情况已删除")
+    raise HTTPException(400, "受教育情况只能修改或补充，不能删除")
 
 
 @router.post("/students/{student_id}/honors")
@@ -347,13 +340,7 @@ def update_revenue(revenue_id: int, payload: RevenueCreate, db: Session = Depend
 
 @router.delete("/revenue/{revenue_id}")
 def delete_revenue(revenue_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
-    record = db.get(AnnualRevenueRecord, revenue_id)
-    if not record:
-        raise HTTPException(404, "年度营收不存在")
-    db.delete(record)
-    add_audit(db, user_id=user.id, action="REVENUE_DELETE", target_table="annual_revenue_records", target_id=revenue_id)
-    db.commit()
-    return ApiResponse(message="年度营收已删除")
+    raise HTTPException(400, "营收情况只能修改或补充，不能删除")
 
 
 @router.post("/business-entities/{entity_id}/industries")

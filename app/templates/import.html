@@ -62,10 +62,11 @@ function renderPreview(data){
   const rows=(data.rows||[]).map(row=>{
     const isError=row.has_error||row.action==='错误';
     const errorText=(row.error_messages||[]).join('；');
+    const noticeText=(row.notice_messages||[]).join('；');
     return `<tr class="${isError?'preview-error-row':''}">
     <td>${row.row}</td>
     <td><span class="tag ${isError?'danger-tag':''}">${escapeHtml(row.action)}</span></td>
-    <td>${escapeHtml(row.name)||'<span class="muted">未填写</span>'}<small class="mono">${escapeHtml(row.id_card_number)}</small>${errorText?`<small class="row-error-message">${escapeHtml(errorText)}</small>`:''}</td>
+    <td>${escapeHtml(row.name)||'<span class="muted">未填写</span>'}<small class="mono">${escapeHtml(row.id_card_number)}</small>${errorText?`<small class="row-error-message">${escapeHtml(errorText)}</small>`:''}${noticeText?`<small class="muted">${escapeHtml(noticeText)}，导入后对应模块显示暂无数据</small>`:''}</td>
     <td>${escapeHtml(row.district_county)||'—'}</td>
     <td>${escapeHtml(row.business_entity_name)||'—'}</td>
     <td>${moduleTags(row.modules)}</td>

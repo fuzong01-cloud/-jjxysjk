@@ -57,6 +57,7 @@ def test_detail_module_create_update_delete(authenticated_client):
     revenue_id = revenue.json()["data"]["id"]
     revenue_payload["operating_revenue"] = 120
     assert authenticated_client.patch(f"/api/v1/revenue/{revenue_id}", json=revenue_payload).status_code == 200
+    assert authenticated_client.delete(f"/api/v1/revenue/{revenue_id}").status_code == 400
 
     industry = authenticated_client.post(f"/api/v1/business-entities/{entity_id}/industries", json={"industry_name": "蔬菜", "three_year_total_income": 300, "operation_years": 5})
     industry_id = industry.json()["data"]["id"]
@@ -69,12 +70,11 @@ def test_detail_module_create_update_delete(authenticated_client):
     detail = authenticated_client.get(f"/students/{student_id}")
     assert "测试主体改" in detail.text and "修改" in detail.text and "删除" in detail.text and "添加培育信息" in detail.text
 
-    assert authenticated_client.delete(f"/api/v1/revenue/{revenue_id}").status_code == 200
     assert authenticated_client.delete(f"/api/v1/industries/{industry_id}").status_code == 200
     assert authenticated_client.delete(f"/api/v1/cultivations/{cultivation_id}").status_code == 200
     assert authenticated_client.delete(f"/api/v1/honors/{honor_id}").status_code == 200
     assert authenticated_client.delete(f"/api/v1/business-entities/{entity_id}").status_code == 200
-    assert authenticated_client.delete(f"/api/v1/students/{student_id}/education").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/students/{student_id}/education").status_code == 400
 
 
 def test_change_password(authenticated_client):
@@ -167,6 +167,26 @@ def test_import_confirmation_preview_rows(authenticated_client, tmp_path):
     assert data["rows"][0]["business_entity_name"] == "预览合作社"
     assert data["rows"][0]["modules"]["honors"] == 1
     assert data["rows"][0]["modules"]["business_entities"] is True
+
+
+def test_missing_modules_warn_but_do_not_block_import(authenticated_client, tmp_path):
+    path = tmp_path / "missing-modules.xlsx"
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"
+    sheet.append(["学员姓名", "身份证号"])
+    sheet.append(["缺模块学员", "11010519491231002X"])
+    book.save(path)
+
+    with path.open("rb") as handle:
+        result = authenticated_client.post(
+            "/api/v1/import/preview",
+            files={"file": ("missing-modules.xlsx", handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+
+    data = result.json()["data"]
+    assert data["failed_rows"] == 0
+    assert data["rows"][0]["notice_messages"]
+    commit = authenticated_client.post(f"/api/v1/import/batches/{data['batch_id']}/commit")
+    assert commit.status_code == 200
 
 
 def test_import_commit_rejects_failed_preview(authenticated_client, tmp_path):

@@ -81,26 +81,39 @@ def preview_rows_for_batch(db: Session, batch: ImportBatch, limit: int = 100) ->
         education_values = [clean_text(v) for v in item.education.values()]
         entity_values = [clean_text(v) for v in item.entity.values()]
         cultivation_values = [clean_text(v) for v in item.cultivation.values()]
+        modules = {
+            "basic_info": bool(clean_text(item.basic.get("name")) or card),
+            "education": any(education_values),
+            "honors": len(item.honors),
+            "business_entities": any(entity_values),
+            "annual_revenues": len(item.revenues),
+            "main_industries": len(item.industries),
+            "cultivations": any(cultivation_values),
+        }
+        missing_labels = []
+        for key, label in {
+            "education": "受教育情况",
+            "honors": "个人荣誉",
+            "business_entities": "经营主体",
+            "annual_revenues": "近三年营收",
+            "main_industries": "主营产业",
+            "cultivations": "个人培育",
+        }.items():
+            if not modules[key]:
+                missing_labels.append(label)
         preview.append(
             {
                 "row": item.row_number,
                 "action": action,
                 "has_error": has_error or item.row_number in error_map,
                 "error_messages": error_map.get(item.row_number, []),
+                "notice_messages": [f"缺少：{'、'.join(missing_labels)}"] if missing_labels else [],
                 "name": clean_text(item.basic.get("name")),
                 "id_card_number": card,
                 "district_county": clean_text(item.basic.get("district_county")),
                 "phone": clean_text(item.basic.get("phone")),
                 "business_entity_name": clean_text(item.entity.get("entity_name")),
-                "modules": {
-                    "basic_info": bool(clean_text(item.basic.get("name")) or card),
-                    "education": any(education_values),
-                    "honors": len(item.honors),
-                    "business_entities": any(entity_values),
-                    "annual_revenues": len(item.revenues),
-                    "main_industries": len(item.industries),
-                    "cultivations": any(cultivation_values),
-                },
+                "modules": modules,
             }
         )
     return preview
