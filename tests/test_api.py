@@ -56,7 +56,7 @@ def test_delete_student_from_list(authenticated_client):
         db.add(student); db.commit(); student_id = student.id
 
     page = authenticated_client.get("/students", params={"name": "待删除"})
-    assert page.status_code == 200 and "删除" in page.text and "待删除学员" in page.text
+    assert page.status_code == 200 and "删除" in page.text and "批量处理" in page.text and "待删除学员" in page.text
 
     result = authenticated_client.delete(f"/api/v1/students/{student_id}")
     assert result.status_code == 200
@@ -65,6 +65,20 @@ def test_delete_student_from_list(authenticated_client):
 
     logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
     assert any(row["action"] == "STUDENT_DELETE" for row in logs)
+
+
+def test_bulk_delete_students(authenticated_client):
+    with SessionLocal() as db:
+        one = Student(name="批量删除甲", id_card_number="11010519491231002X")
+        two = Student(name="批量删除乙", id_card_number="110105194912310018")
+        db.add_all([one, two]); db.commit(); ids = [one.id, two.id]
+
+    result = authenticated_client.post("/api/v1/students/bulk-delete", json={"student_ids": ids})
+    assert result.status_code == 200
+    assert result.json()["data"]["deleted_count"] == 2
+    assert authenticated_client.get("/api/v1/students", params={"name": "批量删除"}).json()["total"] == 0
+    logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
+    assert any(row["action"] == "STUDENT_BULK_DELETE" for row in logs)
 
 
 def test_import_template_download(authenticated_client):

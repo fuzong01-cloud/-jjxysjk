@@ -1,0 +1,63 @@
+.student-head-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.student-table .operation-col {
+  width: 230px;
+  text-align: right;
+}
+
+.student-row-actions {
+  display: grid;
+  grid-template-columns: 1fr 86px;
+  gap: 12px;
+  align-items: center;
+  justify-items: end;
+}
+
+.danger-button {
+  background: #fff1ef !important;
+  color: var(--danger) !important;
+  border: 1px solid #efc7c1 !important;
+}
+
+.danger-button:hover,
+.danger-button:focus {
+  background: var(--danger) !important;
+  color: #fff !important;
+}
+
+.bulk-cell {
+  width: 38px;
+  text-align: center;
+}
+
+.bulk-cell input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--danger);
+}
+
+.bulk-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  background: #fff8f6;
+  border: 1px solid #efc7c1;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.bulk-toolbar b {
+  color: var(--danger);
+}
+
+body:not(.bulk-mode) .bulk-cell {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+}

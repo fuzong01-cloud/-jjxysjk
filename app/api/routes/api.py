@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import hash_password, mask_id_card, mask_phone, verify_password
 from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, BusinessEntity, HonorRecord, ImportBatch, ImportError, MainIndustry, Student, User
-from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentUpdate
+from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentBulkDelete, StudentUpdate
 from app.services.audit_service import add_audit
 from app.services.backup_service import create_backup, restore_database
 from app.services.import_service import commit_batch, create_preview, preview_rows_for_batch
@@ -154,6 +154,26 @@ def delete_student(student_id: int, db: Session = Depends(get_db), user: User = 
     add_audit(db, user_id=user.id, action="STUDENT_DELETE", target_table="students", target_id=student.id, before=before)
     db.commit()
     return ApiResponse(data={"id": student.id}, message="学员档案已删除")
+
+
+@router.post("/students/bulk-delete")
+def bulk_delete_students(payload: StudentBulkDelete, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    ids = list(dict.fromkeys(payload.student_ids))
+    students = db.scalars(select(Student).where(Student.id.in_(ids), Student.deleted_at.is_(None))).all()
+    if not students:
+        raise HTTPException(404, "没有可删除的学员")
+    now = datetime.utcnow()
+    for student in students:
+        student.deleted_at = now
+    add_audit(
+        db,
+        user_id=user.id,
+        action="STUDENT_BULK_DELETE",
+        target_table="students",
+        before={"count": len(students), "ids": [student.id for student in students]},
+    )
+    db.commit()
+    return ApiResponse(data={"deleted_count": len(students)}, message="已批量删除")
 
 
 @router.post("/students/{student_id}/honors")

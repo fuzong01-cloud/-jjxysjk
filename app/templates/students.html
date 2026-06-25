@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}学员档案{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/students.css">{% endblock %}
 {% block content %}
 <header class="page-head">
   <div><p class="eyebrow">共 {{ total }} 份档案</p><h1>学员档案</h1></div>
-  <a class="button secondary" href="/api/v1/export/students.xlsx?name={{ name }}&district={{ district }}">导出当前结果</a>
+  <div class="student-head-actions"><button class="secondary" id="bulkModeBtn">批量处理</button><a class="button secondary" href="/api/v1/export/students.xlsx?name={{ name }}&district={{ district }}">导出当前结果</a></div>
 </header>
 <form class="filter panel">
   <input name="id_card" value="{{ id_card }}" placeholder="身份证号（精准查询）" maxlength="18">
@@ -12,27 +13,75 @@
   <input name="entity_name" value="{{ entity_name }}" placeholder="经营主体名称">
   <button>查找档案</button><a href="/students">重置</a>
 </form>
-<section class="panel"><table>
-  <tr><th>学员</th><th>身份证号</th><th>所在区县</th><th>手机号</th><th>状态</th><th></th></tr>
-  {% for s in students %}<tr>
-    <td><strong>{{ s.name }}</strong><small>{{ s.age or '—' }} 岁 · {{ s.gender or '未填' }}</small></td>
-    <td class="mono">{{ mask_id_card(s.id_card_number) }}</td><td>{{ s.district_county or '—' }}</td>
-    <td class="mono">{{ mask_phone(s.phone) }}</td><td><span class="tag">{{ s.status or '未标注' }}</span></td>
-    <td><div class="actions"><a href="/students/{{ s.id }}">打开档案 →</a><button class="secondary delete-student" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}">删除</button></div></td>
-  </tr>{% else %}<tr><td colspan="6" class="empty">没有匹配的档案。请检查身份证号或调整查询条件。</td></tr>{% endfor %}
-</table></section>
+<section class="panel">
+  <div class="bulk-toolbar" id="bulkToolbar" hidden>
+    <span>已选择 <b id="selectedCount">0</b> 位学员</span>
+    <button class="danger-button" id="bulkDeleteBtn" disabled>删除所选</button>
+    <button class="secondary" id="exitBulkBtn">退出批量处理</button>
+  </div>
+  <table class="student-table">
+    <tr><th class="bulk-cell"><input type="checkbox" id="selectAll" aria-label="全选本页学员" hidden></th><th>学员</th><th>身份证号</th><th>所在区县</th><th>手机号</th><th>状态</th><th class="operation-col">操作</th></tr>
+    {% for s in students %}<tr>
+      <td class="bulk-cell"><input class="student-check" type="checkbox" value="{{ s.id }}" data-student-name="{{ s.name }}" hidden></td>
+      <td><strong>{{ s.name }}</strong><small>{{ s.age or '—' }} 岁 · {{ s.gender or '未填' }}</small></td>
+      <td class="mono">{{ mask_id_card(s.id_card_number) }}</td><td>{{ s.district_county or '—' }}</td>
+      <td class="mono">{{ mask_phone(s.phone) }}</td><td><span class="tag">{{ s.status or '未标注' }}</span></td>
+      <td class="operation-col"><div class="student-row-actions"><a href="/students/{{ s.id }}">打开档案 →</a><button class="danger-button delete-student" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}">删除</button></div></td>
+    </tr>{% else %}<tr><td colspan="7" class="empty">没有匹配的档案。请检查身份证号或调整查询条件。</td></tr>{% endfor %}
+  </table>
+</section>
 {% endblock %}
 {% block scripts %}
 <script>
+const bulkModeBtn=document.getElementById('bulkModeBtn');
+const bulkToolbar=document.getElementById('bulkToolbar');
+const exitBulkBtn=document.getElementById('exitBulkBtn');
+const bulkDeleteBtn=document.getElementById('bulkDeleteBtn');
+const selectedCount=document.getElementById('selectedCount');
+const selectAll=document.getElementById('selectAll');
+const checks=[...document.querySelectorAll('.student-check')];
+
+function setBulkMode(enabled){
+  document.body.classList.toggle('bulk-mode',enabled);
+  bulkToolbar.hidden=!enabled;
+  if(selectAll)selectAll.hidden=!enabled;
+  checks.forEach(check=>{check.hidden=!enabled;if(!enabled)check.checked=false});
+  if(selectAll)selectAll.checked=false;
+  updateSelectedCount();
+}
+
+function updateSelectedCount(){
+  const selected=checks.filter(check=>check.checked);
+  selectedCount.textContent=selected.length;
+  bulkDeleteBtn.disabled=selected.length===0;
+}
+
+bulkModeBtn?.addEventListener('click',()=>setBulkMode(true));
+exitBulkBtn?.addEventListener('click',()=>setBulkMode(false));
+selectAll?.addEventListener('change',()=>{checks.forEach(check=>check.checked=selectAll.checked);updateSelectedCount()});
+checks.forEach(check=>check.addEventListener('change',updateSelectedCount));
+
 document.querySelectorAll('.delete-student').forEach(button=>{
   button.addEventListener('click', async ()=>{
     const name=button.dataset.studentName||'该学员';
-    if(!confirm(`确认删除“${name}”的档案？删除后列表和查询中将不再显示。`))return;
+    if(!confirm(`请再次确认：确定删除“${name}”的档案吗？\n\n删除后列表和查询中将不再显示。`))return;
     button.disabled=true;
     const r=await fetch(`/api/v1/students/${button.dataset.studentId}`,{method:'DELETE'});
     const j=await r.json().catch(()=>({}));
     if(r.ok){alert('已删除');location.reload()}else{alert(j.detail||'删除失败');button.disabled=false}
   });
+});
+
+bulkDeleteBtn?.addEventListener('click', async ()=>{
+  const selected=checks.filter(check=>check.checked);
+  if(!selected.length)return;
+  const names=selected.slice(0,5).map(check=>check.dataset.studentName).join('、');
+  const suffix=selected.length>5?`等 ${selected.length} 位`:`共 ${selected.length} 位`;
+  if(!confirm(`请再次确认：确定批量删除 ${suffix} 学员档案吗？\n\n${names}\n\n删除后列表和查询中将不再显示。`))return;
+  bulkDeleteBtn.disabled=true;
+  const r=await fetch('/api/v1/students/bulk-delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({student_ids:selected.map(check=>Number(check.value))})});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){alert(`已删除 ${j.data.deleted_count} 位学员`);location.reload()}else{alert(j.detail||'批量删除失败');bulkDeleteBtn.disabled=false}
 });
 </script>
 {% endblock %}

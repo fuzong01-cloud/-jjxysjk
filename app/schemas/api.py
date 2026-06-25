@@ -55,5 +55,9 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=10)
 
 
+class StudentBulkDelete(BaseModel):
+    student_ids: list[int] = Field(min_length=1, max_length=100)
+
+
 class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
