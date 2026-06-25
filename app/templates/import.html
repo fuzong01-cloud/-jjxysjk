@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}数据导入{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/import_preview.css">{% endblock %}
 {% block content %}
 <header class="page-head"><div><p class="eyebrow">Excel 导入流水线</p><h1>先预览，再确认写入</h1><p>必须使用扁平名单：第一行为字段名，每行一位学员；“学员姓名”和“身份证号”必填。列顺序不限。</p></div><a class="button secondary" href="/api/v1/import/template.xlsx">下载标准模板</a></header>
 <section class="drop panel"><input id="excelFile" type="file" accept=".xlsx"><button id="previewBtn">上传并生成确认预览</button><p class="hint">支持 .xlsx。原文件不会被修改；确认前只做读取和校验，不写入学员档案。</p><div id="previewResult"></div></section>
@@ -58,14 +59,18 @@ function moduleTags(modules){
 function renderPreview(data){
   const successRows=data.success_rows??Math.max((data.total_rows||0)-(data.failed_rows||0),0);
   const previewLimit=data.preview_limit||100;
-  const rows=(data.rows||[]).map(row=>`<tr>
+  const rows=(data.rows||[]).map(row=>{
+    const isError=row.has_error||row.action==='错误';
+    const errorText=(row.error_messages||[]).join('；');
+    return `<tr class="${isError?'preview-error-row':''}">
     <td>${row.row}</td>
-    <td><span class="tag">${escapeHtml(row.action)}</span></td>
-    <td>${escapeHtml(row.name)||'<span class="muted">未填写</span>'}<small class="mono">${escapeHtml(row.id_card_number)}</small></td>
+    <td><span class="tag ${isError?'danger-tag':''}">${escapeHtml(row.action)}</span></td>
+    <td>${escapeHtml(row.name)||'<span class="muted">未填写</span>'}<small class="mono">${escapeHtml(row.id_card_number)}</small>${errorText?`<small class="row-error-message">${escapeHtml(errorText)}</small>`:''}</td>
     <td>${escapeHtml(row.district_county)||'—'}</td>
     <td>${escapeHtml(row.business_entity_name)||'—'}</td>
     <td>${moduleTags(row.modules)}</td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
   const more=data.total_rows>previewLimit?`<p class="hint">页面只显示前 ${previewLimit} 行用于确认，确认写入时会处理全部 ${data.total_rows} 行。</p>`:'';
   const blockCommit=data.failed_rows>0;
   previewResult.innerHTML=`<div class="preview-box">

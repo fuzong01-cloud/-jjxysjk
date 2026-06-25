@@ -62,6 +62,11 @@ def preview_rows_for_batch(db: Session, batch: ImportBatch, limit: int = 100) ->
     """
     existing = set(db.scalars(select(Student.id_card_number)).all())
     _, rows, _ = parse_workbook(Path(batch.stored_file_path))
+    error_map: dict[int, list[str]] = {}
+    for error in batch.errors:
+        if error.severity == "error":
+            field = error.field_name or "字段"
+            error_map.setdefault(error.excel_row_number, []).append(f"{field}：{error.error_message}")
     preview: list[dict[str, Any]] = []
     for item in rows[:limit]:
         raw_card = clean_text(item.basic.get("id_card_number"))
@@ -80,7 +85,8 @@ def preview_rows_for_batch(db: Session, batch: ImportBatch, limit: int = 100) ->
             {
                 "row": item.row_number,
                 "action": action,
-                "has_error": has_error,
+                "has_error": has_error or item.row_number in error_map,
+                "error_messages": error_map.get(item.row_number, []),
                 "name": clean_text(item.basic.get("name")),
                 "id_card_number": card,
                 "district_county": clean_text(item.basic.get("district_county")),

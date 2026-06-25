@@ -1,0 +1,18 @@
+.preview-error-row {
+  background: #fff1ef !important;
+  box-shadow: inset 5px 0 0 var(--danger);
+}
+
+.preview-error-row td {
+  border-bottom-color: #efc7c1;
+}
+
+.danger-tag {
+  background: var(--danger) !important;
+  color: #fff !important;
+}
+
+.row-error-message {
+  color: var(--danger) !important;
+  font-weight: 700;
+}

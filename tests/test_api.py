@@ -91,6 +91,9 @@ def test_import_commit_rejects_failed_preview(authenticated_client, tmp_path):
         )
 
     batch_id = result.json()["data"]["batch_id"]
+    error_row = [row for row in result.json()["data"]["rows"] if row["action"] == "错误"][0]
+    assert error_row["has_error"] is True
+    assert error_row["error_messages"]
     commit = authenticated_client.post(f"/api/v1/import/batches/{batch_id}/commit")
     assert commit.status_code == 400
 
