@@ -50,6 +50,23 @@ def test_id_card_page_search_and_category_tables(authenticated_client):
         assert title in detail.text
 
 
+def test_delete_student_from_list(authenticated_client):
+    with SessionLocal() as db:
+        student = Student(name="待删除学员", id_card_number="11010519491231002X", district_county="测试区")
+        db.add(student); db.commit(); student_id = student.id
+
+    page = authenticated_client.get("/students", params={"name": "待删除"})
+    assert page.status_code == 200 and "删除" in page.text and "待删除学员" in page.text
+
+    result = authenticated_client.delete(f"/api/v1/students/{student_id}")
+    assert result.status_code == 200
+    assert authenticated_client.get(f"/api/v1/students/{student_id}").status_code == 404
+    assert authenticated_client.get("/students", params={"name": "待删除"}).text.count("待删除学员") == 0
+
+    logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
+    assert any(row["action"] == "STUDENT_DELETE" for row in logs)
+
+
 def test_import_template_download(authenticated_client):
     result = authenticated_client.get("/api/v1/import/template.xlsx")
     assert result.status_code == 200

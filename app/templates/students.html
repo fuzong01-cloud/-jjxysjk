@@ -18,7 +18,21 @@
     <td><strong>{{ s.name }}</strong><small>{{ s.age or '—' }} 岁 · {{ s.gender or '未填' }}</small></td>
     <td class="mono">{{ mask_id_card(s.id_card_number) }}</td><td>{{ s.district_county or '—' }}</td>
     <td class="mono">{{ mask_phone(s.phone) }}</td><td><span class="tag">{{ s.status or '未标注' }}</span></td>
-    <td><a href="/students/{{ s.id }}">打开档案 →</a></td>
+    <td><div class="actions"><a href="/students/{{ s.id }}">打开档案 →</a><button class="secondary delete-student" data-student-id="{{ s.id }}" data-student-name="{{ s.name }}">删除</button></div></td>
   </tr>{% else %}<tr><td colspan="6" class="empty">没有匹配的档案。请检查身份证号或调整查询条件。</td></tr>{% endfor %}
 </table></section>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('.delete-student').forEach(button=>{
+  button.addEventListener('click', async ()=>{
+    const name=button.dataset.studentName||'该学员';
+    if(!confirm(`确认删除“${name}”的档案？删除后列表和查询中将不再显示。`))return;
+    button.disabled=true;
+    const r=await fetch(`/api/v1/students/${button.dataset.studentId}`,{method:'DELETE'});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){alert('已删除');location.reload()}else{alert(j.detail||'删除失败');button.disabled=false}
+  });
+});
+</script>
 {% endblock %}

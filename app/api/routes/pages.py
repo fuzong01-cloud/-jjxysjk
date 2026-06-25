@@ -48,7 +48,7 @@ def logout(request: Request, db: Session = Depends(get_db)):
 def dashboard(request: Request, db: Session = Depends(get_db)):
     user = _user(request, db)
     if not user: return RedirectResponse("/login")
-    context = {"user": user, "student_count": db.scalar(select(func.count(Student.id))) or 0, "entity_count": db.scalar(select(func.count(BusinessEntity.id))) or 0, "honor_count": db.scalar(select(func.count(HonorRecord.id)).where(HonorRecord.deleted_at.is_(None))) or 0, "latest_batch": db.scalar(select(ImportBatch).order_by(ImportBatch.id.desc()).limit(1)), "logs": db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(6)).all()}
+    context = {"user": user, "student_count": db.scalar(select(func.count(Student.id)).where(Student.deleted_at.is_(None))) or 0, "entity_count": db.scalar(select(func.count(BusinessEntity.id))) or 0, "honor_count": db.scalar(select(func.count(HonorRecord.id)).where(HonorRecord.deleted_at.is_(None))) or 0, "latest_batch": db.scalar(select(ImportBatch).order_by(ImportBatch.id.desc()).limit(1)), "logs": db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(6)).all()}
     return templates.TemplateResponse(request, "dashboard.html", context)
 
 
@@ -70,7 +70,7 @@ def student_list(request: Request, name: str = "", id_card: str = "", district: 
 def student_detail_page(student_id: int, request: Request, db: Session = Depends(get_db)):
     user = _user(request, db)
     if not user: return RedirectResponse("/login")
-    student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id))
+    student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id, Student.deleted_at.is_(None)))
     if not student: return templates.TemplateResponse(request, "message.html", {"user": user, "title": "找不到学员", "message": "该档案可能已被删除。"}, status_code=404)
     return templates.TemplateResponse(request, "student_detail.html", {"user": user, "student": student})
 

@@ -1,4 +1,5 @@
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -121,14 +122,14 @@ def students(name: str | None = None, id_card: str | None = None, district: str 
 
 @router.get("/students/{student_id}")
 def student_detail(student_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
-    student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id))
+    student = db.scalar(select(Student).options(selectinload(Student.education), selectinload(Student.honors), selectinload(Student.entities).selectinload(BusinessEntity.revenues), selectinload(Student.entities).selectinload(BusinessEntity.industries), selectinload(Student.cultivations)).where(Student.id == student_id, Student.deleted_at.is_(None)))
     if not student: raise HTTPException(404, "学员不存在")
     return ApiResponse(data=archive_data(student))
 
 
 @router.get("/students/by-id-card/{id_card_number}")
 def by_id_card(id_card_number: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
-    student = db.scalar(select(Student).where(Student.id_card_number == id_card_number.replace(" ", "").upper()))
+    student = db.scalar(select(Student).where(Student.id_card_number == id_card_number.replace(" ", "").upper(), Student.deleted_at.is_(None)))
     if not student: raise HTTPException(404, "学员不存在")
     return student_detail(student.id, db, user)
 
@@ -136,11 +137,23 @@ def by_id_card(id_card_number: str, db: Session = Depends(get_db), user: User = 
 @router.patch("/students/{student_id}/basic-info")
 def update_student(student_id: int, payload: StudentUpdate, request: Request, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
     student = db.get(Student, student_id)
-    if not student: raise HTTPException(404, "学员不存在")
+    if not student or student.deleted_at is not None: raise HTTPException(404, "学员不存在")
     changes = payload.model_dump(exclude_unset=True); before = {k: getattr(student, k) for k in changes}
     for key, value in changes.items(): setattr(student, key, value)
     add_audit(db, user_id=user.id, action="STUDENT_UPDATE", target_table="students", target_id=student.id, before=before, after=changes, ip_address=request.client.host if request.client else None)
     db.commit(); return ApiResponse(data={"id": student.id}, message="学员信息已更新")
+
+
+@router.delete("/students/{student_id}")
+def delete_student(student_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    student = db.get(Student, student_id)
+    if not student or student.deleted_at is not None:
+        raise HTTPException(404, "学员不存在")
+    before = {"name": student.name, "id_card_number": mask_id_card(student.id_card_number)}
+    student.deleted_at = datetime.utcnow()
+    add_audit(db, user_id=user.id, action="STUDENT_DELETE", target_table="students", target_id=student.id, before=before)
+    db.commit()
+    return ApiResponse(data={"id": student.id}, message="学员档案已删除")
 
 
 @router.post("/students/{student_id}/honors")
