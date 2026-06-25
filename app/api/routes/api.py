@@ -12,8 +12,8 @@ from app.core.auth import current_user
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import hash_password, mask_id_card, mask_phone, verify_password
-from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, BusinessEntity, HonorRecord, ImportBatch, ImportError, MainIndustry, Student, User
-from app.schemas.api import ApiResponse, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentBulkDelete, StudentUpdate
+from app.models.entities import AnnualRevenueRecord, AuditLog, BackupRecord, BusinessEntity, CultivationRecord, EducationRecord, HonorRecord, ImportBatch, ImportError, MainIndustry, Student, User
+from app.schemas.api import ApiResponse, CultivationCreate, EducationUpdate, EntityUpdate, HonorCreate, IndustryCreate, PasswordChange, RevenueCreate, StudentBulkDelete, StudentUpdate
 from app.services.audit_service import add_audit
 from app.services.backup_service import create_backup, restore_database
 from app.services.import_service import commit_batch, create_preview, preview_rows_for_batch
@@ -139,6 +139,12 @@ def update_student(student_id: int, payload: StudentUpdate, request: Request, db
     student = db.get(Student, student_id)
     if not student or student.deleted_at is not None: raise HTTPException(404, "学员不存在")
     changes = payload.model_dump(exclude_unset=True); before = {k: getattr(student, k) for k in changes}
+    if "id_card_number" in changes and changes["id_card_number"]:
+        new_card = changes["id_card_number"].replace(" ", "").upper()
+        exists = db.scalar(select(Student).where(Student.id_card_number == new_card, Student.id != student.id))
+        if exists:
+            raise HTTPException(400, "身份证号已存在")
+        changes["id_card_number"] = new_card
     for key, value in changes.items(): setattr(student, key, value)
     add_audit(db, user_id=user.id, action="STUDENT_UPDATE", target_table="students", target_id=student.id, before=before, after=changes, ip_address=request.client.host if request.client else None)
     db.commit(); return ApiResponse(data={"id": student.id}, message="学员信息已更新")
@@ -176,12 +182,60 @@ def bulk_delete_students(payload: StudentBulkDelete, db: Session = Depends(get_d
     return ApiResponse(data={"deleted_count": len(students)}, message="已批量删除")
 
 
+@router.put("/students/{student_id}/education")
+def upsert_education(student_id: int, payload: EducationUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    student = db.scalar(select(Student).options(selectinload(Student.education)).where(Student.id == student_id, Student.deleted_at.is_(None)))
+    if not student:
+        raise HTTPException(404, "学员不存在")
+    data = payload.model_dump()
+    if student.education is None:
+        student.education = EducationRecord(**data)
+        db.flush()
+        target_id = student.education.id
+        action = "EDUCATION_CREATE"
+        before = None
+    else:
+        before = {k: getattr(student.education, k) for k in data}
+        for key, value in data.items():
+            setattr(student.education, key, value)
+        target_id = student.education.id
+        action = "EDUCATION_UPDATE"
+    add_audit(db, user_id=user.id, action=action, target_table="education_records", target_id=target_id, before=before, after=data)
+    db.commit()
+    return ApiResponse(data={"id": target_id}, message="受教育情况已保存")
+
+
+@router.delete("/students/{student_id}/education")
+def delete_education(student_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    student = db.scalar(select(Student).options(selectinload(Student.education)).where(Student.id == student_id, Student.deleted_at.is_(None)))
+    if not student or student.education is None:
+        raise HTTPException(404, "受教育情况不存在")
+    target_id = student.education.id
+    db.delete(student.education)
+    add_audit(db, user_id=user.id, action="EDUCATION_DELETE", target_table="education_records", target_id=target_id)
+    db.commit()
+    return ApiResponse(message="受教育情况已删除")
+
+
 @router.post("/students/{student_id}/honors")
 def add_honor(student_id: int, payload: HonorCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
     if not db.get(Student, student_id): raise HTTPException(404, "学员不存在")
     honor = HonorRecord(student_id=student_id, **payload.model_dump()); db.add(honor); db.flush()
     add_audit(db, user_id=user.id, action="HONOR_CREATE", target_table="honor_records", target_id=honor.id, after=payload.model_dump(mode="json")); db.commit()
     return ApiResponse(data={"id": honor.id}, message="荣誉已添加")
+
+
+@router.patch("/honors/{honor_id}")
+def update_honor(honor_id: int, payload: HonorCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    honor = db.get(HonorRecord, honor_id)
+    if not honor or honor.deleted_at is not None:
+        raise HTTPException(404, "荣誉不存在")
+    changes = payload.model_dump(); before = {k: getattr(honor, k) for k in changes}
+    for key, value in changes.items():
+        setattr(honor, key, value)
+    add_audit(db, user_id=user.id, action="HONOR_UPDATE", target_table="honor_records", target_id=honor.id, before=before, after=changes)
+    db.commit()
+    return ApiResponse(data={"id": honor.id}, message="荣誉已更新")
 
 
 @router.delete("/honors/{honor_id}")
@@ -203,6 +257,29 @@ def update_entity(entity_id: int, payload: EntityUpdate, db: Session = Depends(g
     return ApiResponse(data={"id": entity.id}, message="经营主体已更新")
 
 
+@router.post("/students/{student_id}/business-entities")
+def add_entity(student_id: int, payload: EntityUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not db.scalar(select(Student.id).where(Student.id == student_id, Student.deleted_at.is_(None))):
+        raise HTTPException(404, "学员不存在")
+    data = payload.model_dump()
+    entity = BusinessEntity(student_id=student_id, **data)
+    db.add(entity); db.flush()
+    add_audit(db, user_id=user.id, action="ENTITY_CREATE", target_table="business_entities", target_id=entity.id, after=data)
+    db.commit()
+    return ApiResponse(data={"id": entity.id}, message="经营主体已添加")
+
+
+@router.delete("/business-entities/{entity_id}")
+def delete_entity(entity_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    entity = db.get(BusinessEntity, entity_id)
+    if not entity or entity.deleted_at is not None:
+        raise HTTPException(404, "经营主体不存在")
+    entity.deleted_at = datetime.utcnow()
+    add_audit(db, user_id=user.id, action="ENTITY_DELETE", target_table="business_entities", target_id=entity.id)
+    db.commit()
+    return ApiResponse(message="经营主体已删除")
+
+
 @router.get("/business-entities")
 def entity_list(entity_name: str | None = None, student_name: str | None = None, district: str | None = None, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100), db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict:
     stmt = select(BusinessEntity).join(BusinessEntity.student).where(BusinessEntity.deleted_at.is_(None))
@@ -218,7 +295,24 @@ def entity_list(entity_name: str | None = None, student_name: str | None = None,
 def entity_detail(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     entity = db.scalar(select(BusinessEntity).options(selectinload(BusinessEntity.revenues), selectinload(BusinessEntity.industries)).where(BusinessEntity.id == entity_id))
     if not entity: raise HTTPException(404, "经营主体不存在")
-    return ApiResponse(data={"id": entity.id, "student_id": entity.student_id, "entity_name": entity.entity_name, "entity_intro": entity.entity_intro, "entity_type": entity.entity_type, "entity_subtype": entity.entity_subtype, "established_date": entity.established_date, "registered_address": entity.registered_address, "unified_social_credit_code": entity.unified_social_credit_code, "student_position_in_entity": entity.student_position_in_entity})
+    return ApiResponse(data={
+        "id": entity.id, "student_id": entity.student_id, "entity_name": entity.entity_name,
+        "entity_intro": entity.entity_intro, "entity_type": entity.entity_type,
+        "entity_subtype": entity.entity_subtype, "entity_industry_type": entity.entity_industry_type,
+        "established_date": entity.established_date, "registered_address": entity.registered_address,
+        "unified_social_credit_code": entity.unified_social_credit_code,
+        "industry_years": entity.industry_years,
+        "student_position_in_entity": entity.student_position_in_entity,
+        "patent_applications": entity.patent_applications,
+        "farmer_households_driven": entity.farmer_households_driven,
+        "technical_partner_count": entity.technical_partner_count,
+        "technical_partners": entity.technical_partners,
+        "quality_inspection_org": entity.quality_inspection_org,
+        "quality_system_certification": entity.quality_system_certification,
+        "green_organic_geo_certification": entity.green_organic_geo_certification,
+        "entity_honors": entity.entity_honors,
+        "supporting_policies": entity.supporting_policies,
+    })
 
 
 @router.post("/business-entities/{entity_id}/revenue")
@@ -231,7 +325,14 @@ def add_revenue(entity_id: int, payload: RevenueCreate, db: Session = Depends(ge
 @router.get("/business-entities/{entity_id}/revenue")
 def revenues(entity_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     rows = db.scalars(select(AnnualRevenueRecord).where(AnnualRevenueRecord.business_entity_id == entity_id).order_by(AnnualRevenueRecord.year.desc())).all()
-    return ApiResponse(data=[{"id": r.id, "year": r.year, "operating_revenue": r.operating_revenue, "net_profit": r.net_profit} for r in rows])
+    return ApiResponse(data=[{
+        "id": r.id, "year": r.year, "operating_revenue": r.operating_revenue,
+        "net_profit": r.net_profit, "fixed_asset_net_value": r.fixed_asset_net_value,
+        "total_assets": r.total_assets, "total_liabilities": r.total_liabilities,
+        "employee_count": r.employee_count, "current_assets": r.current_assets,
+        "management_expense": r.management_expense,
+        "government_subsidy_amount": r.government_subsidy_amount,
+    } for r in rows])
 
 
 @router.patch("/revenue/{revenue_id}")
@@ -242,6 +343,17 @@ def update_revenue(revenue_id: int, payload: RevenueCreate, db: Session = Depend
     for key, value in changes.items(): setattr(record, key, value)
     add_audit(db, user_id=user.id, action="REVENUE_UPDATE", target_table="annual_revenue_records", target_id=record.id, before=before, after=changes); db.commit()
     return ApiResponse(data={"id": record.id}, message="年度营收已更新")
+
+
+@router.delete("/revenue/{revenue_id}")
+def delete_revenue(revenue_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(AnnualRevenueRecord, revenue_id)
+    if not record:
+        raise HTTPException(404, "年度营收不存在")
+    db.delete(record)
+    add_audit(db, user_id=user.id, action="REVENUE_DELETE", target_table="annual_revenue_records", target_id=revenue_id)
+    db.commit()
+    return ApiResponse(message="年度营收已删除")
 
 
 @router.post("/business-entities/{entity_id}/industries")
@@ -265,6 +377,53 @@ def update_industry(industry_id: int, payload: IndustryCreate, db: Session = Dep
     for key, value in changes.items(): setattr(record, key, value)
     add_audit(db, user_id=user.id, action="INDUSTRY_UPDATE", target_table="main_industries", target_id=record.id, before=before, after=changes); db.commit()
     return ApiResponse(data={"id": record.id}, message="主营产业已更新")
+
+
+@router.delete("/industries/{industry_id}")
+def delete_industry(industry_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(MainIndustry, industry_id)
+    if not record:
+        raise HTTPException(404, "主营产业不存在")
+    db.delete(record)
+    add_audit(db, user_id=user.id, action="INDUSTRY_DELETE", target_table="main_industries", target_id=industry_id)
+    db.commit()
+    return ApiResponse(message="主营产业已删除")
+
+
+@router.post("/students/{student_id}/cultivations")
+def add_cultivation(student_id: int, payload: CultivationCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    if not db.scalar(select(Student.id).where(Student.id == student_id, Student.deleted_at.is_(None))):
+        raise HTTPException(404, "学员不存在")
+    data = payload.model_dump()
+    record = CultivationRecord(student_id=student_id, **data)
+    db.add(record); db.flush()
+    add_audit(db, user_id=user.id, action="CULTIVATION_CREATE", target_table="cultivation_records", target_id=record.id, after=data)
+    db.commit()
+    return ApiResponse(data={"id": record.id}, message="培育信息已添加")
+
+
+@router.patch("/cultivations/{cultivation_id}")
+def update_cultivation(cultivation_id: int, payload: CultivationCreate, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(CultivationRecord, cultivation_id)
+    if not record:
+        raise HTTPException(404, "培育信息不存在")
+    changes = payload.model_dump(); before = {k: getattr(record, k) for k in changes}
+    for key, value in changes.items():
+        setattr(record, key, value)
+    add_audit(db, user_id=user.id, action="CULTIVATION_UPDATE", target_table="cultivation_records", target_id=record.id, before=before, after=changes)
+    db.commit()
+    return ApiResponse(data={"id": record.id}, message="培育信息已更新")
+
+
+@router.delete("/cultivations/{cultivation_id}")
+def delete_cultivation(cultivation_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ApiResponse:
+    record = db.get(CultivationRecord, cultivation_id)
+    if not record:
+        raise HTTPException(404, "培育信息不存在")
+    db.delete(record)
+    add_audit(db, user_id=user.id, action="CULTIVATION_DELETE", target_table="cultivation_records", target_id=cultivation_id)
+    db.commit()
+    return ApiResponse(message="培育信息已删除")
 
 
 @router.post("/import/preview")
@@ -372,12 +531,21 @@ def batch_errors(batch_id: int, db: Session = Depends(get_db), _user: User = Dep
 
 
 @router.get("/export/students.xlsx")
-def export_students(name: str | None = None, district: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    rows = db.scalars(student_query(name, None, district, None).order_by(Student.id)).all()
+def export_students(name: str | None = None, district: str | None = None, ids: str | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if ids:
+        try:
+            selected_ids = [int(item) for item in ids.split(",") if item.strip()]
+        except ValueError as exc:
+            raise HTTPException(400, "学员 ID 格式不正确") from exc
+        rows = db.scalars(select(Student).where(Student.id.in_(selected_ids), Student.deleted_at.is_(None)).order_by(Student.id)).all()
+        export_action = "EXPORT_SELECTED_STUDENTS"
+    else:
+        rows = db.scalars(student_query(name, None, district, None).order_by(Student.id)).all()
+        export_action = "EXPORT_STUDENTS"
     book = Workbook(); sheet = book.active; sheet.title = "学员名单"; sheet.append(["姓名", "身份证号", "性别", "出生日期", "年龄", "所在区县", "手机号", "状态"])
     for s in rows: sheet.append([s.name, s.id_card_number, s.gender, s.birth_date, s.age, s.district_county, s.phone, s.status])
     stream = tempfile.SpooledTemporaryFile(); book.save(stream); stream.seek(0)
-    add_audit(db, user_id=user.id, action="EXPORT_STUDENTS", target_table="students", after={"count": len(rows)}); db.commit()
+    add_audit(db, user_id=user.id, action=export_action, target_table="students", after={"count": len(rows)}); db.commit()
     return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": "attachment; filename=students.xlsx"})
 
 

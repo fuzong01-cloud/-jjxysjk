@@ -32,6 +32,51 @@ def test_add_honor(authenticated_client):
     assert result.status_code == 200
 
 
+def test_detail_module_create_update_delete(authenticated_client):
+    with SessionLocal() as db:
+        student = Student(name="模块维护学员", id_card_number="11010519491231002X")
+        db.add(student); db.commit(); student_id = student.id
+
+    education = authenticated_client.put(f"/api/v1/students/{student_id}/education", json={"education_level": "本科", "graduate_school": "测试大学", "major": "农学", "certificate_number": "A001", "learning_experience": "学习", "work_experience": "工作", "training_experience": "培训"})
+    assert education.status_code == 200
+    education2 = authenticated_client.put(f"/api/v1/students/{student_id}/education", json={"education_level": "研究生", "graduate_school": "测试大学", "major": "农学", "certificate_number": "A002", "learning_experience": "学习2", "work_experience": "工作2", "training_experience": "培训2"})
+    assert education2.status_code == 200
+
+    honor = authenticated_client.post(f"/api/v1/students/{student_id}/honors", json={"honor_number": "H1", "honor_time": "2024-01-01", "honor_level": "区级", "honor_description": "测试荣誉"})
+    honor_id = honor.json()["data"]["id"]
+    assert authenticated_client.patch(f"/api/v1/honors/{honor_id}", json={"honor_number": "H2", "honor_time": "2024-02-01", "honor_level": "市级", "honor_description": "修改荣誉"}).status_code == 200
+
+    entity_payload = {"entity_name": "测试主体", "entity_intro": "简介", "entity_type": "合作社", "entity_subtype": "种植", "entity_industry_type": "蔬菜", "established_date": "2020-01-01", "registered_address": "地址", "unified_social_credit_code": "CODE1", "industry_years": 4, "student_position_in_entity": "负责人", "patent_applications": "无", "farmer_households_driven": 10, "technical_partner_count": 2, "technical_partners": "单位", "quality_inspection_org": "是", "quality_system_certification": "认证", "green_organic_geo_certification": "绿色", "entity_honors": "荣誉", "supporting_policies": "支持"}
+    entity = authenticated_client.post(f"/api/v1/students/{student_id}/business-entities", json=entity_payload)
+    entity_id = entity.json()["data"]["id"]
+    entity_payload["entity_name"] = "测试主体改"
+    assert authenticated_client.patch(f"/api/v1/business-entities/{entity_id}", json=entity_payload).status_code == 200
+
+    revenue_payload = {"year": 2024, "operating_revenue": 100, "net_profit": 10, "fixed_asset_net_value": 20, "total_assets": 200, "total_liabilities": 50, "employee_count": 8, "current_assets": 80, "management_expense": 5, "government_subsidy_amount": 3}
+    revenue = authenticated_client.post(f"/api/v1/business-entities/{entity_id}/revenue", json=revenue_payload)
+    revenue_id = revenue.json()["data"]["id"]
+    revenue_payload["operating_revenue"] = 120
+    assert authenticated_client.patch(f"/api/v1/revenue/{revenue_id}", json=revenue_payload).status_code == 200
+
+    industry = authenticated_client.post(f"/api/v1/business-entities/{entity_id}/industries", json={"industry_name": "蔬菜", "three_year_total_income": 300, "operation_years": 5})
+    industry_id = industry.json()["data"]["id"]
+    assert authenticated_client.patch(f"/api/v1/industries/{industry_id}", json={"industry_name": "水果", "three_year_total_income": 400, "operation_years": 6}).status_code == 200
+
+    cultivation = authenticated_client.post(f"/api/v1/students/{student_id}/cultivations", json={"cultivation_year": 2024, "cultivation_needs": "需求", "training_experience": "经历"})
+    cultivation_id = cultivation.json()["data"]["id"]
+    assert authenticated_client.patch(f"/api/v1/cultivations/{cultivation_id}", json={"cultivation_year": 2025, "cultivation_needs": "需求2", "training_experience": "经历2"}).status_code == 200
+
+    detail = authenticated_client.get(f"/students/{student_id}")
+    assert "测试主体改" in detail.text and "修改" in detail.text and "删除" in detail.text and "添加培育信息" in detail.text
+
+    assert authenticated_client.delete(f"/api/v1/revenue/{revenue_id}").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/industries/{industry_id}").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/cultivations/{cultivation_id}").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/honors/{honor_id}").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/business-entities/{entity_id}").status_code == 200
+    assert authenticated_client.delete(f"/api/v1/students/{student_id}/education").status_code == 200
+
+
 def test_change_password(authenticated_client):
     result = authenticated_client.post("/api/v1/auth/password", json={"current_password": "TestPass123!", "new_password": "NewTestPass456!"})
     assert result.status_code == 200
@@ -79,6 +124,22 @@ def test_bulk_delete_students(authenticated_client):
     assert authenticated_client.get("/api/v1/students", params={"name": "批量删除"}).json()["total"] == 0
     logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
     assert any(row["action"] == "STUDENT_BULK_DELETE" for row in logs)
+
+
+def test_bulk_export_selected_students(authenticated_client):
+    with SessionLocal() as db:
+        one = Student(name="批量导出甲", id_card_number="11010519491231002X")
+        two = Student(name="批量导出乙", id_card_number="110105194912310018")
+        db.add_all([one, two]); db.commit(); ids = [one.id, two.id]
+
+    page = authenticated_client.get("/students")
+    assert "批量处理" in page.text and "已选择 0 位学员" not in page.text
+
+    result = authenticated_client.get("/api/v1/export/students.xlsx", params={"ids": ",".join(map(str, ids))})
+    assert result.status_code == 200
+    assert result.headers["content-type"].startswith("application/vnd.openxmlformats")
+    logs = authenticated_client.get("/api/v1/audit-logs").json()["data"]
+    assert any(row["action"] == "EXPORT_SELECTED_STUDENTS" for row in logs)
 
 
 def test_import_template_download(authenticated_client):

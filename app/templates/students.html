@@ -16,6 +16,7 @@
 <section class="panel">
   <div class="bulk-toolbar" id="bulkToolbar" hidden>
     <span>已选择 <b id="selectedCount">0</b> 位学员</span>
+    <button class="secondary" id="bulkExportBtn" disabled>导出所选</button>
     <button class="danger-button" id="bulkDeleteBtn" disabled>删除所选</button>
     <button class="secondary" id="exitBulkBtn">退出批量处理</button>
   </div>
@@ -36,6 +37,7 @@
 const bulkModeBtn=document.getElementById('bulkModeBtn');
 const bulkToolbar=document.getElementById('bulkToolbar');
 const exitBulkBtn=document.getElementById('exitBulkBtn');
+const bulkExportBtn=document.getElementById('bulkExportBtn');
 const bulkDeleteBtn=document.getElementById('bulkDeleteBtn');
 const selectedCount=document.getElementById('selectedCount');
 const selectAll=document.getElementById('selectAll');
@@ -53,6 +55,7 @@ function setBulkMode(enabled){
 function updateSelectedCount(){
   const selected=checks.filter(check=>check.checked);
   selectedCount.textContent=selected.length;
+  bulkExportBtn.disabled=selected.length===0;
   bulkDeleteBtn.disabled=selected.length===0;
 }
 
@@ -60,6 +63,13 @@ bulkModeBtn?.addEventListener('click',()=>setBulkMode(true));
 exitBulkBtn?.addEventListener('click',()=>setBulkMode(false));
 selectAll?.addEventListener('change',()=>{checks.forEach(check=>check.checked=selectAll.checked);updateSelectedCount()});
 checks.forEach(check=>check.addEventListener('change',updateSelectedCount));
+
+bulkExportBtn?.addEventListener('click',()=>{
+  const selected=checks.filter(check=>check.checked);
+  if(!selected.length)return;
+  const ids=selected.map(check=>check.value).join(',');
+  window.location.href=`/api/v1/export/students.xlsx?ids=${encodeURIComponent(ids)}`;
+});
 
 document.querySelectorAll('.delete-student').forEach(button=>{
   button.addEventListener('click', async ()=>{
