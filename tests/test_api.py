@@ -93,3 +93,22 @@ def test_import_commit_rejects_failed_preview(authenticated_client, tmp_path):
     batch_id = result.json()["data"]["batch_id"]
     commit = authenticated_client.post(f"/api/v1/import/batches/{batch_id}/commit")
     assert commit.status_code == 400
+
+
+def test_cancel_import_preview(authenticated_client, tmp_path):
+    path = tmp_path / "cancel-preview.xlsx"
+    book = Workbook(); sheet = book.active; sheet.title = "Sheet1"
+    sheet.append(["学员姓名", "身份证号"])
+    sheet.append(["取消预览学员", "11010519491231002X"])
+    book.save(path)
+
+    with path.open("rb") as handle:
+        result = authenticated_client.post(
+            "/api/v1/import/preview",
+            files={"file": ("cancel-preview.xlsx", handle, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+
+    batch_id = result.json()["data"]["batch_id"]
+    cancel = authenticated_client.delete(f"/api/v1/import/batches/{batch_id}")
+    assert cancel.status_code == 200
+    assert authenticated_client.get(f"/api/v1/import/batches/{batch_id}/preview").status_code == 404

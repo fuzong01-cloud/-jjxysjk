@@ -18,15 +18,23 @@ previewBtn.onclick=async()=>{
   const j=await r.json();
   previewBtn.disabled=false;
   if(!r.ok)return alert(j.detail||'检查失败');
-  renderPreview(j.data);
+  renderPreview(await ensurePreviewRows(j.data));
 };
 
 async function loadBatchPreview(id){
   const r=await fetch(`/api/v1/import/batches/${id}/preview`);
   const j=await r.json();
   if(!r.ok)return alert(j.detail||'读取预览失败');
-  renderPreview(j.data);
+  renderPreview(await ensurePreviewRows(j.data));
   window.scrollTo({top:0,behavior:'smooth'});
+}
+
+async function ensurePreviewRows(data){
+  if((data.rows||[]).length || !data.batch_id)return data;
+  const r=await fetch(`/api/v1/import/batches/${data.batch_id}/preview`);
+  if(!r.ok)return data;
+  const j=await r.json();
+  return j.data||data;
 }
 
 function escapeHtml(value){
@@ -39,6 +47,7 @@ function escapeHtml(value){
 }
 
 function moduleTags(modules){
+  modules=modules||{};
   return Object.entries(moduleLabels).map(([key,label])=>{
     const value=modules[key];
     const text=typeof value==='number'?`${label}${value?`×${value}`:''}`:label;
@@ -47,6 +56,8 @@ function moduleTags(modules){
 }
 
 function renderPreview(data){
+  const successRows=data.success_rows??Math.max((data.total_rows||0)-(data.failed_rows||0),0);
+  const previewLimit=data.preview_limit||100;
   const rows=(data.rows||[]).map(row=>`<tr>
     <td>${row.row}</td>
     <td><span class="tag">${escapeHtml(row.action)}</span></td>
@@ -55,15 +66,27 @@ function renderPreview(data){
     <td>${escapeHtml(row.business_entity_name)||'—'}</td>
     <td>${moduleTags(row.modules)}</td>
   </tr>`).join('');
-  const more=data.total_rows>data.preview_limit?`<p class="hint">页面只显示前 ${data.preview_limit} 行用于确认，确认写入时会处理全部 ${data.total_rows} 行。</p>`:'';
+  const more=data.total_rows>previewLimit?`<p class="hint">页面只显示前 ${previewLimit} 行用于确认，确认写入时会处理全部 ${data.total_rows} 行。</p>`:'';
   const blockCommit=data.failed_rows>0;
   previewResult.innerHTML=`<div class="preview-box">
-    <div class="panel-title"><div><b>${data.total_rows}</b> 行已读取 · 可写入 ${data.success_rows} · 新增 ${data.new_rows} · 更新 ${data.updated_rows} · 错误 ${data.failed_rows} · 警告 ${data.warning_count}</div>
-    <button ${blockCommit?'disabled':''} onclick="commitBatch(${data.batch_id})">确认写入数据库</button></div>
+    <div class="panel-title"><div><b>${data.total_rows}</b> 行已读取 · 可写入 ${successRows} · 新增 ${data.new_rows??0} · 更新 ${data.updated_rows??0} · 错误 ${data.failed_rows??0} · 警告 ${data.warning_count??0}</div>
+    <div class="actions"><button class="secondary" onclick="cancelPreview(${data.batch_id})">取消本次预览</button><button ${blockCommit?'disabled':''} onclick="commitBatch(${data.batch_id})">确认写入数据库</button></div></div>
     ${blockCommit?'<p class="error">存在错误行，请先修正 Excel 后重新上传；系统不会在有错误时写入。</p>':'<p class="hint">请核对下面预览。确认后才会正式写入数据库。</p>'}
     ${more}
     <div style="overflow:auto"><table><tr><th>Excel 行号</th><th>动作</th><th>学员</th><th>区县</th><th>经营主体</th><th>识别到的模块</th></tr>${rows||'<tr><td colspan="6" class="empty">没有可预览的数据。</td></tr>'}</table></div>
   </div>`;
+}
+
+async function cancelPreview(id){
+  if(!id){previewResult.innerHTML='';excelFile.value='';return}
+  const r=await fetch(`/api/v1/import/batches/${id}`,{method:'DELETE'});
+  if(!r.ok){
+    const j=await r.json().catch(()=>({}));
+    return alert(j.detail||'取消失败');
+  }
+  previewResult.innerHTML='';
+  excelFile.value='';
+  location.reload();
 }
 
 async function commitBatch(id){

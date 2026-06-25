@@ -320,6 +320,18 @@ def batch_preview(batch_id: int, db: Session = Depends(get_db), _user: User = De
     )
 
 
+@router.delete("/import/batches/{batch_id}")
+def cancel_import_batch(batch_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
+    batch = db.get(ImportBatch, batch_id)
+    if not batch:
+        raise HTTPException(404, "导入批次不存在")
+    if batch.status != "preview":
+        raise HTTPException(400, "只能取消尚未写入的预览批次")
+    db.delete(batch)
+    db.commit()
+    return ApiResponse(data={"batch_id": batch_id}, message="已取消本次预览")
+
+
 @router.get("/import/batches/{batch_id}/errors")
 def batch_errors(batch_id: int, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> ApiResponse:
     rows = db.scalars(select(ImportError).where(ImportError.import_batch_id == batch_id)).all()
